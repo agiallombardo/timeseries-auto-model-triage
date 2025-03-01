@@ -1,7 +1,7 @@
 ## Time Series Auto Model Triage
 This framework automatically tests and evaluates multiple forecasting models on time series data, including statistical, machine learning, and deep learning approaches. It provides comprehensive visualizations and model selection capabilities.
 
-The top 3 performing models will be selected for the given time series data and the corresponding hyperparameter tuning results.
+For the given time series data and the corresponding hyperparameter tuning results, the top 3 performing models will be selected.
 
 ## Author
 Anthony Giallombardo & Claude 3.7
@@ -13,7 +13,7 @@ Anthony Giallombardo & Claude 3.7
 - Detailed performance metrics and comparisons
 - Dataset-specific result organization
 
-** Sample Data
+Sample Data
 The package includes sample datasets in the data/samples directory:
 
 Retail Sales Data - Daily retail sales with seasonal patterns, trends, and holiday effects
@@ -23,7 +23,7 @@ You can generate these sample datasets using:
 `python data/samples/generate_retail_sales.py`
 `python data/samples/generate_energy_consumption.py`
 
-** Basic Usage
+Basic Usage
 Run the forecaster with default settings on the retail sales sample:
 `python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales`
 
@@ -34,12 +34,12 @@ This will:
 - Save results in results/retail_sales_daily/
 
 ## Example Scenarios
-** Forecasting Retail Sales
+Forecasting Retail Sales
 `python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales`
 
 For this dataset, machine learning models like Random Forest and XGBoost typically outperform statistical models because they can capture complex patterns, including seasonal effects and holiday periods.
 
-** Forecasting Energy Consumption
+Forecasting Energy Consumption
 `python main.py --file data/samples/energy_consumption_hourly.csv --time_col timestamp --data_col energy_consumption`
 
 This high-frequency data with multiple seasonality patterns (daily, weekly, yearly) benefits from models like LSTM and Prophet that can capture these complex temporal dependencies.
@@ -65,22 +65,22 @@ Each dataset's results are saved in a dedicated directory (results/{dataset_name
 
 ## Supported Models
 
-** Statistical Models
+Statistical Models
 - ARIMA (AutoRegressive Integrated Moving Average)
 - SARIMA (Seasonal ARIMA)
 - Moving Average
 - Exponential Smoothing
 
-** Machine Learning Models
+Machine Learning Models
 - Random Forest
 - SVR (Support Vector Regression)
 - XGBoost
 
-** Deep Learning Models
+Deep Learning Models
 - RNN (Recurrent Neural Network)
 - LSTM (Long Short-Term Memory)
 
-** Other Models
+Other Models
 - Facebook Prophet
 
 ## Advanced Configuration
