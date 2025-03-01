@@ -1,10 +1,10 @@
 ## Time Series Auto Model Triage
 This framework automatically tests and evaluates multiple forecasting models on time series data, including statistical, machine learning, and deep learning approaches. It provides comprehensive visualizations and model selection capabilities.
 
-The top 3 peforming models will be selected for the given time series data and the cooresponding hyperpratmer tuning results.
+The top 3 performing models will be selected for the given time series data and the corresponding hyperparameter tuning results.
 
-## About
-author = Anthony Giallombardo
+## Author
+Anthony Giallombardo & Claude 3.7
 
 ## Features
 Supports 10 different forecasting models
