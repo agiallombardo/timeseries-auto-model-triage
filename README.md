@@ -7,11 +7,11 @@ The top 3 performing models will be selected for the given time series data and 
 Anthony Giallombardo & Claude 3.7
 
 ## Features
-Supports 10 different forecasting models
-Automatic hyperparameter tuning for top-performing models
-Comprehensive visualization of results
-Detailed performance metrics and comparisons
-Dataset-specific result organization
+- Supports 10 different forecasting models
+- Automatic hyperparameter tuning for top-performing models
+- Comprehensive visualization of results
+- Detailed performance metrics and comparisons
+- Dataset-specific result organization
 
 ** Sample Data
 The package includes sample datasets in the data/samples directory:
@@ -28,10 +28,10 @@ Run the forecaster with default settings on the retail sales sample:
 `python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales`
 
 This will:
-Run all available forecasting models
-Automatically tune the top 3 performing models
-Generate visualizations and performance metrics
-Save results in results/retail_sales_daily/
+- Run all available forecasting models
+- Automatically tune the top 3 performing models
+- Generate visualizations and performance metrics
+- Save results in results/retail_sales_daily/
 
 ## Example Scenarios
 ** Forecasting Retail Sales
@@ -56,32 +56,32 @@ Tune only the top 5 models (default is 3):
 
 ## Understanding Results
 Each dataset's results are saved in a dedicated directory (results/{dataset_name}/):
-all_models_trellis.png - Grid of plots showing each model's performance
-top_3_models_comparison.png - Detailed comparison of the best models
-model_performance.png - Bar charts comparing metrics across models
-model_comparison_results.csv - Tabular performance metrics
-top_models_info.json - Details about the top models and dataset
-{model}_best_params.json - Optimized parameters for tuned models
+- all_models_trellis.png - Grid of plots showing each model's performance
+- top_3_models_comparison.png - Detailed comparison of the best models
+- model_performance.png - Bar charts comparing metrics across models
+- model_comparison_results.csv - Tabular performance metrics
+- top_models_info.json - Details about the top models and dataset
+- {model}_best_params.json - Optimized parameters for tuned models
 
 ## Supported Models
 
 ** Statistical Models
-ARIMA (AutoRegressive Integrated Moving Average)
-SARIMA (Seasonal ARIMA)
-Moving Average
-Exponential Smoothing
+- ARIMA (AutoRegressive Integrated Moving Average)
+- SARIMA (Seasonal ARIMA)
+- Moving Average
+- Exponential Smoothing
 
 ** Machine Learning Models
-Random Forest
-SVR (Support Vector Regression)
-XGBoost
+- Random Forest
+- SVR (Support Vector Regression)
+- XGBoost
 
 ** Deep Learning Models
-RNN (Recurrent Neural Network)
-LSTM (Long Short-Term Memory)
+- RNN (Recurrent Neural Network)
+- LSTM (Long Short-Term Memory)
 
 ** Other Models
-Facebook Prophet
+- Facebook Prophet
 
 ## Advanced Configuration
 Adjust lag features for machine learning models:
