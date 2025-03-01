@@ -21,7 +21,6 @@ Energy Consumption Data - Hourly energy usage with multiple seasonal patterns an
 
 You can generate these sample datasets using:
 `python data/samples/generate_retail_sales.py`
-
 `python data/samples/generate_energy_consumption.py`
 
 ** Basic Usage
