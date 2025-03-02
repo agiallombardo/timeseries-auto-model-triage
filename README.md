@@ -29,7 +29,7 @@ Anthony Giallombardo & Assistant Claude
 
 **Basic Usage** \
 Run the forecaster with default settings on the retail sales sample: \
-`python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales` \
+`python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales` 
 
 **This will**
 - Run all available forecasting models
@@ -41,7 +41,7 @@ Run the forecaster with default settings on the retail sales sample: \
 **Forecasting Retail Sales** \
 `python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales` 
 
-For this dataset, machine learning models like Random Forest and XGBoost typically outperform statistical models because they can capture complex patterns, including seasonal effects and holiday periods. \
+For this dataset, machine learning models like Random Forest and XGBoost typically outperform statistical models because they can capture complex patterns, including seasonal effects and holiday periods. 
 
 **Forecasting Energy Consumption** \
 `python main.py --file data/samples/energy_consumption_hourly.csv --time_col timestamp --data_col energy_consumption` 
