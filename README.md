@@ -39,25 +39,25 @@ Run the forecaster with default settings on the retail sales sample: \
 
 ## Example Scenarios
 **Forecasting Retail Sales** \
-`python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales` \
+`python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales` 
 
 For this dataset, machine learning models like Random Forest and XGBoost typically outperform statistical models because they can capture complex patterns, including seasonal effects and holiday periods. \
 
 **Forecasting Energy Consumption** \
-`python main.py --file data/samples/energy_consumption_hourly.csv --time_col timestamp --data_col energy_consumption` \
+`python main.py --file data/samples/energy_consumption_hourly.csv --time_col timestamp --data_col energy_consumption` 
 
-This high-frequency data with multiple seasonality patterns (daily, weekly, yearly) benefits from models like LSTM and Prophet that can capture these complex temporal dependencies. \
+This high-frequency data with multiple seasonality patterns (daily, weekly, yearly) benefits from models like LSTM and Prophet that can capture these complex temporal dependencies. 
 
 **Forecasting with Selections**
 
 ***To test only specific models:*** \
-`python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales --models rf xgb prophet` \
+`python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales --models rf xgb prophet` 
 
 ***Tune all models (can be time-consuming):*** \
-`python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales --tune_all` \
+`python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales --tune_all` 
 
 ***Tune only the top 5 models (default is 3):*** \
-`python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales --tune_top 5` \
+`python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales --tune_top 5` 
 
   
 ## Understanding Results
@@ -94,10 +94,10 @@ Each dataset's results are saved in a dedicated directory (results/{dataset_name
 ## Advanced Configuration
 
 Adjust lag features for machine learning models: \
-`python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales --lags 10` \
+`python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales --lags 10`
 
 Set the test set size: \
-`python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales --test_size 0.3` \
+`python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales --test_size 0.3`
 
 Configure sequence length for neural networks: \
-`python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales --n_steps 5` \
+`python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales --n_steps 5`
