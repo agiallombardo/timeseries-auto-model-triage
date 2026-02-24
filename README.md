@@ -1,5 +1,5 @@
 # Time Series Auto Model Triage
-Trying to manually figure out the best prediction model and hyperparatmers are can take hours per dataset. WIth it being the same process each time, why not automate it?
+Trying to manually figure out the best prediction model and hyperparameters can take hours per dataset. With it being the same process each time, why not automate it?
 
 This framework automatically tests and evaluates multiple forecasting models on time series data, including statistical, machine learning, and deep learning approaches. It provides comprehensive visualizations and model selection capabilities.
 
