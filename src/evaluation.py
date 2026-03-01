@@ -245,8 +245,8 @@ def create_top_models_plot(y_train, y_test, predictions, model_names, save_path=
     # Connect inset to main plot
     mark_inset(plt.gca(), axins, loc1=2, loc2=4, fc="none", ec="0.5")
     
-    # Save the plot
-    plt.tight_layout()
+    # Save the plot (bbox_inches='tight' handles layout; tight_layout is
+    # incompatible with zoomed_inset_axes and would produce a warning).
     plt.savefig(save_path, bbox_inches='tight')
     plt.close()
     

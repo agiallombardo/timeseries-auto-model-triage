@@ -226,3 +226,149 @@ def run_lstm(train_data, test_data, n_steps=3):
     predictions = scaler.inverse_transform(np.array(predictions).reshape(-1, 1)).ravel()
     
     return predictions, scaler
+
+
+def run_mlp(X_train, X_test, y_train):
+    """
+    Run MLP model on the same lag/rolling features used by tree-based models.
+
+    Parameters:
+    -----------
+    X_train : DataFrame
+        Training features (lags, rolling stats, calendar, etc.)
+    X_test : DataFrame
+        Test features
+    y_train : Series
+        Training target values
+
+    Returns:
+    --------
+    np.ndarray
+        Predictions for the test set
+    """
+    logger.info("Training MLP model...")
+
+    scaler = StandardScaler()
+    X_train_sc = scaler.fit_transform(X_train)
+    X_test_sc = scaler.transform(X_test)
+
+    model = Sequential([
+        Input(shape=(X_train_sc.shape[1],)),
+        Dense(64, activation='relu'),
+        Dropout(0.2),
+        Dense(32, activation='relu'),
+        Dropout(0.2),
+        Dense(1),
+    ])
+    model.compile(optimizer=Adam(learning_rate=0.001), loss='mse')
+
+    early_stopping = EarlyStopping(
+        monitor='val_loss', patience=10, restore_best_weights=True
+    )
+
+    model.fit(
+        X_train_sc, y_train,
+        epochs=200,
+        batch_size=32,
+        validation_split=0.2,
+        callbacks=[early_stopping],
+        verbose=0,
+    )
+
+    predictions = model.predict(X_test_sc, verbose=0).ravel()
+    return predictions
+
+
+def prepare_feature_sequences(X_train, X_test, y_train, y_test, n_steps):
+    """
+    Build 3-D input sequences from the 2-D feature matrices so that an LSTM
+    can consume the same lag/rolling features used by tree-based models.
+
+    For time index *i* the input is X[i-n_steps : i] (shape ``(n_steps, n_features)``)
+    and the target is y[i].  Sequences that straddle the train/test boundary
+    are handled correctly: the first test sequence uses the last ``n_steps``
+    training rows as context.
+
+    Returns:
+    --------
+    tuple
+        (X_train_seq, X_test_seq, y_train_seq, y_test_seq)
+    """
+    X_all = np.vstack([X_train.values if hasattr(X_train, 'values') else X_train,
+                       X_test.values if hasattr(X_test, 'values') else X_test])
+    y_all = np.concatenate([y_train.values if hasattr(y_train, 'values') else y_train,
+                            y_test.values if hasattr(y_test, 'values') else y_test])
+
+    train_end = len(X_train)
+
+    X_seq, y_seq, is_train = [], [], []
+    for i in range(n_steps, len(X_all)):
+        X_seq.append(X_all[i - n_steps:i])
+        y_seq.append(y_all[i])
+        is_train.append(i < train_end)
+
+    X_seq = np.array(X_seq)
+    y_seq = np.array(y_seq)
+    is_train = np.array(is_train)
+
+    return (X_seq[is_train], X_seq[~is_train],
+            y_seq[is_train], y_seq[~is_train])
+
+
+def run_lstm_features(X_train, X_test, y_train, y_test, n_steps=5):
+    """
+    Many-to-one LSTM that operates on the same feature matrices as the
+    tree-based models.  One forward pass per test sample (no recursive
+    rollout).
+
+    Parameters:
+    -----------
+    X_train, X_test : DataFrame
+        Feature matrices (lags, rolling stats, calendar, etc.)
+    y_train, y_test : Series
+        Target values
+    n_steps : int
+        Number of consecutive feature rows fed to the LSTM
+
+    Returns:
+    --------
+    np.ndarray
+        Predictions aligned with y_test
+    """
+    logger.info("Training LSTM (many-to-one) model...")
+
+    X_tr_seq, X_te_seq, y_tr_seq, _ = prepare_feature_sequences(
+        X_train, X_test, y_train, y_test, n_steps
+    )
+
+    n_features = X_tr_seq.shape[2]
+
+    scaler = StandardScaler()
+    X_tr_flat = X_tr_seq.reshape(-1, n_features)
+    scaler.fit(X_tr_flat)
+
+    X_tr_seq = scaler.transform(X_tr_seq.reshape(-1, n_features)).reshape(X_tr_seq.shape)
+    X_te_seq = scaler.transform(X_te_seq.reshape(-1, n_features)).reshape(X_te_seq.shape)
+
+    model = Sequential([
+        Input(shape=(n_steps, n_features)),
+        LSTM(64, activation='relu'),
+        Dense(1),
+    ])
+    model.compile(optimizer=Adam(learning_rate=0.001), loss='mse')
+
+    early_stopping = EarlyStopping(
+        monitor='val_loss', patience=10, restore_best_weights=True
+    )
+
+    model.fit(
+        X_tr_seq, y_tr_seq,
+        epochs=200,
+        batch_size=32,
+        validation_split=0.2,
+        callbacks=[early_stopping],
+        verbose=0,
+    )
+
+    predictions = model.predict(X_te_seq, verbose=0).ravel()
+    return predictions

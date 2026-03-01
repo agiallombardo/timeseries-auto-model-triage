@@ -3,13 +3,18 @@ import pandas as pd
 import logging
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, LSTM, SimpleRNN, Dropout
+from tensorflow.keras.layers import Dense, Input, LSTM, SimpleRNN, Dropout
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error
 import itertools
 from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
+
+from ..models.deep_learning import (
+    prepare_sequence_data, create_rnn_model, create_lstm_model,
+    run_rnn, run_lstm, prepare_feature_sequences,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -327,3 +332,295 @@ def grid_search_lstm(train_data, test_data):
         best_predictions, _ = run_lstm(train_data, test_data)
     
     return best_params, best_predictions, scaler
+
+
+def grid_search_mlp(X_train, X_test, y_train, y_test):
+    """
+    Grid search for MLP hyperparameters using the same feature matrices
+    as the tree-based models.
+
+    Returns:
+    --------
+    tuple
+        (best_params dict, predictions array)
+    """
+    logger.info("Performing grid search for MLP model...")
+
+    scaler = StandardScaler()
+    X_train_sc = scaler.fit_transform(X_train)
+    X_test_sc = scaler.transform(X_test)
+
+    val_size = int(len(X_train_sc) * 0.2)
+    X_tr, X_val = X_train_sc[:-val_size], X_train_sc[-val_size:]
+    y_tr = y_train.values[:-val_size] if hasattr(y_train, 'values') else y_train[:-val_size]
+    y_val = y_train.values[-val_size:] if hasattr(y_train, 'values') else y_train[-val_size:]
+
+    hidden_units_list = [32, 64, 128]
+    dropout_rates = [0.1, 0.2, 0.3]
+    learning_rates = [0.001, 0.01]
+
+    best_rmse = float('inf')
+    best_params = None
+    results = []
+
+    max_combinations = 18
+    combinations_tested = 0
+
+    early_stopping = EarlyStopping(
+        monitor='val_loss', patience=10, restore_best_weights=True
+    )
+
+    for units in hidden_units_list:
+        for dr in dropout_rates:
+            for lr in learning_rates:
+                if combinations_tested >= max_combinations:
+                    break
+
+                model = Sequential([
+                    Input(shape=(X_tr.shape[1],)),
+                    Dense(units, activation='relu'),
+                    Dropout(dr),
+                    Dense(units // 2, activation='relu'),
+                    Dropout(dr),
+                    Dense(1),
+                ])
+                model.compile(optimizer=Adam(learning_rate=lr), loss='mse')
+
+                try:
+                    model.fit(
+                        X_tr, y_tr,
+                        epochs=100,
+                        batch_size=32,
+                        validation_data=(X_val, y_val),
+                        callbacks=[early_stopping],
+                        verbose=0,
+                    )
+
+                    val_pred = model.predict(X_val, verbose=0).ravel()
+                    rmse = np.sqrt(mean_squared_error(y_val, val_pred))
+
+                    results.append({
+                        'units': units, 'dropout': dr,
+                        'learning_rate': lr, 'rmse': rmse,
+                    })
+
+                    if rmse < best_rmse:
+                        best_rmse = rmse
+                        best_params = {
+                            'units': units, 'dropout': dr,
+                            'learning_rate': lr,
+                        }
+
+                    logger.debug(
+                        f"MLP(units={units}, dropout={dr}, lr={lr}) "
+                        f"- RMSE: {rmse:.4f}"
+                    )
+                    combinations_tested += 1
+                except Exception as e:
+                    logger.warning(f"Error training MLP: {e}")
+                    continue
+
+            if combinations_tested >= max_combinations:
+                break
+        if combinations_tested >= max_combinations:
+            break
+
+    logger.info(f"Best MLP parameters: {best_params} with RMSE: {best_rmse:.4f}")
+
+    if results:
+        pd.DataFrame(results).sort_values('rmse').to_csv(
+            'mlp_grid_search_results.csv', index=False
+        )
+
+    if best_params is not None:
+        u = best_params['units']
+        model = Sequential([
+            Input(shape=(X_train_sc.shape[1],)),
+            Dense(u, activation='relu'),
+            Dropout(best_params['dropout']),
+            Dense(u // 2, activation='relu'),
+            Dropout(best_params['dropout']),
+            Dense(1),
+        ])
+        model.compile(
+            optimizer=Adam(learning_rate=best_params['learning_rate']),
+            loss='mse',
+        )
+        model.fit(
+            X_train_sc, y_train,
+            epochs=200,
+            batch_size=32,
+            validation_split=0.2,
+            callbacks=[early_stopping],
+            verbose=0,
+        )
+        best_predictions = model.predict(X_test_sc, verbose=0).ravel()
+    else:
+        logger.warning("No valid MLP found during grid search. Using defaults.")
+        from ..models.deep_learning import run_mlp
+        best_predictions = run_mlp(X_train, X_test, y_train)
+
+    return best_params, best_predictions
+
+
+def grid_search_lstm_features(X_train, X_test, y_train, y_test):
+    """
+    Grid search for the many-to-one LSTM that uses feature matrices.
+
+    Returns:
+    --------
+    tuple
+        (best_params dict, predictions array)
+    """
+    logger.info("Performing grid search for LSTM (many-to-one) model...")
+
+    n_steps_list = [3, 5, 7]
+    units_list = [32, 64]
+    dropout_rates = [0.0, 0.2]
+    learning_rates = [0.001, 0.01]
+
+    best_rmse = float('inf')
+    best_params = None
+    results = []
+
+    max_combinations = 24
+    combinations_tested = 0
+
+    for n_steps in n_steps_list:
+        X_tr_seq, X_te_seq, y_tr_seq, y_te_seq = prepare_feature_sequences(
+            X_train, X_test, y_train, y_test, n_steps
+        )
+        if len(X_tr_seq) == 0:
+            continue
+
+        n_features = X_tr_seq.shape[2]
+
+        seq_scaler = StandardScaler()
+        seq_scaler.fit(X_tr_seq.reshape(-1, n_features))
+        X_tr_sc = seq_scaler.transform(
+            X_tr_seq.reshape(-1, n_features)
+        ).reshape(X_tr_seq.shape)
+
+        val_size = max(1, int(len(X_tr_sc) * 0.2))
+        X_tr_s, X_val_s = X_tr_sc[:-val_size], X_tr_sc[-val_size:]
+        y_tr_s, y_val_s = y_tr_seq[:-val_size], y_tr_seq[-val_size:]
+
+        for units in units_list:
+            for dr in dropout_rates:
+                for lr in learning_rates:
+                    if combinations_tested >= max_combinations:
+                        break
+
+                    model = Sequential()
+                    model.add(Input(shape=(n_steps, n_features)))
+                    model.add(LSTM(units, activation='relu'))
+                    if dr > 0:
+                        model.add(Dropout(dr))
+                    model.add(Dense(1))
+                    model.compile(
+                        optimizer=Adam(learning_rate=lr), loss='mse'
+                    )
+
+                    es = EarlyStopping(
+                        monitor='val_loss', patience=10,
+                        restore_best_weights=True,
+                    )
+
+                    try:
+                        model.fit(
+                            X_tr_s, y_tr_s,
+                            epochs=50,
+                            batch_size=32,
+                            validation_data=(X_val_s, y_val_s),
+                            callbacks=[es],
+                            verbose=0,
+                        )
+
+                        val_pred = model.predict(X_val_s, verbose=0).ravel()
+                        rmse = np.sqrt(mean_squared_error(y_val_s, val_pred))
+
+                        results.append({
+                            'n_steps': n_steps, 'units': units,
+                            'dropout': dr, 'learning_rate': lr,
+                            'rmse': rmse,
+                        })
+
+                        if rmse < best_rmse:
+                            best_rmse = rmse
+                            best_params = {
+                                'n_steps': n_steps, 'units': units,
+                                'dropout': dr, 'learning_rate': lr,
+                            }
+
+                        logger.debug(
+                            f"LSTM-feat(n_steps={n_steps}, units={units}, "
+                            f"dropout={dr}, lr={lr}) - RMSE: {rmse:.4f}"
+                        )
+                        combinations_tested += 1
+                    except Exception as e:
+                        logger.warning(f"Error training LSTM-feat: {e}")
+                        continue
+
+                if combinations_tested >= max_combinations:
+                    break
+            if combinations_tested >= max_combinations:
+                break
+        if combinations_tested >= max_combinations:
+            break
+
+    logger.info(
+        f"Best LSTM-feat parameters: {best_params} with RMSE: {best_rmse:.4f}"
+    )
+
+    if results:
+        pd.DataFrame(results).sort_values('rmse').to_csv(
+            'lstm_feat_grid_search_results.csv', index=False
+        )
+
+    if best_params is not None:
+        ns = best_params['n_steps']
+        X_tr_seq, X_te_seq, y_tr_seq, _ = prepare_feature_sequences(
+            X_train, X_test, y_train, y_test, ns
+        )
+        n_features = X_tr_seq.shape[2]
+
+        seq_scaler = StandardScaler()
+        seq_scaler.fit(X_tr_seq.reshape(-1, n_features))
+        X_tr_sc = seq_scaler.transform(
+            X_tr_seq.reshape(-1, n_features)
+        ).reshape(X_tr_seq.shape)
+        X_te_sc = seq_scaler.transform(
+            X_te_seq.reshape(-1, n_features)
+        ).reshape(X_te_seq.shape)
+
+        model = Sequential()
+        model.add(Input(shape=(ns, n_features)))
+        model.add(LSTM(best_params['units'], activation='relu'))
+        if best_params['dropout'] > 0:
+            model.add(Dropout(best_params['dropout']))
+        model.add(Dense(1))
+        model.compile(
+            optimizer=Adam(learning_rate=best_params['learning_rate']),
+            loss='mse',
+        )
+
+        es = EarlyStopping(
+            monitor='val_loss', patience=10, restore_best_weights=True
+        )
+        model.fit(
+            X_tr_sc, y_tr_seq,
+            epochs=200,
+            batch_size=32,
+            validation_split=0.2,
+            callbacks=[es],
+            verbose=0,
+        )
+        best_predictions = model.predict(X_te_sc, verbose=0).ravel()
+    else:
+        logger.warning(
+            "No valid LSTM-feat found during grid search. Using defaults."
+        )
+        from ..models.deep_learning import run_lstm_features
+        best_predictions = run_lstm_features(X_train, X_test, y_train, y_test)
+
+    return best_params, best_predictions

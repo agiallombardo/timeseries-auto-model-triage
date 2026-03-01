@@ -24,6 +24,7 @@ DISPLAY_NAME_TO_REGISTRY_KEY = {
     'exponential': 'es',
     'random': 'rf',
     'xgboost': 'xgb',
+    'lstm-feat': 'lstm_feat',
 }
 
 # Module-level logger
@@ -42,7 +43,7 @@ def main():
     parser.add_argument('--n_steps', type=int, default=3, help='Number of time steps for sequence models (RNN/LSTM)')
     parser.add_argument('--ma_window', type=int, default=3, help='Window size for Moving Average')
     parser.add_argument('--models', nargs='+', default=['all'], 
-                      help='Models to run (all, arima, sarima, es, prophet, rf, svr, xgb, ma, rnn, lstm)')
+                      help='Models to run (all, arima, sarima, es, prophet, rf, svr, xgb, ma, rnn, lstm, mlp, lstm_feat)')
     parser.add_argument('--tune_top', type=int, default=3, 
                    help='Number of top models to tune (default: 3, set to 0 to disable tuning)')
     parser.add_argument('--tune_all', action='store_true', 

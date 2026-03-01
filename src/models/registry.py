@@ -5,12 +5,12 @@ logger = logging.getLogger(__name__)
 
 from .statistical import run_arima, run_sarima, run_moving_average, run_exponential_smoothing
 from .ml import run_random_forest, run_svr, run_xgboost
-from .deep_learning import run_rnn, run_lstm
+from .deep_learning import run_rnn, run_lstm, run_mlp, run_lstm_features
 from .prophet import run_prophet
 
 from ..tuning.statistical import grid_search_arima, grid_search_sarima, grid_search_moving_average, grid_search_exponential_smoothing
 from ..tuning.ml import grid_search_random_forest, grid_search_svr, grid_search_xgboost
-from ..tuning.deep_learning import grid_search_rnn, grid_search_lstm
+from ..tuning.deep_learning import grid_search_rnn, grid_search_lstm, grid_search_mlp, grid_search_lstm_features
 from ..tuning.prophet import grid_search_prophet
 
 def get_available_models():
@@ -25,7 +25,9 @@ def get_available_models():
         'svr': run_svr_wrapper,
         'xgb': run_xgb_wrapper,
         'rnn': run_rnn_wrapper,
-        'lstm': run_lstm_wrapper
+        'lstm': run_lstm_wrapper,
+        'mlp': run_mlp_wrapper,
+        'lstm_feat': run_lstm_feat_wrapper,
     }
 
 def get_tuning_functions():
@@ -40,7 +42,9 @@ def get_tuning_functions():
         'svr': tune_svr_wrapper,
         'xgb': tune_xgb_wrapper,
         'rnn': tune_rnn_wrapper,
-        'lstm': tune_lstm_wrapper
+        'lstm': tune_lstm_wrapper,
+        'mlp': tune_mlp_wrapper,
+        'lstm_feat': tune_lstm_feat_wrapper,
     }
 
 # Model wrapper functions
@@ -84,6 +88,14 @@ def run_lstm_wrapper(y_train, y_test, n_steps=3, **kwargs):
     pred, _ = run_lstm(y_train, y_test, n_steps=n_steps)
     return pred, "LSTM"
 
+def run_mlp_wrapper(y_train, y_test, X_train=None, X_test=None, **kwargs):
+    pred = run_mlp(X_train, X_test, y_train)
+    return pred, "MLP"
+
+def run_lstm_feat_wrapper(y_train, y_test, X_train=None, X_test=None, n_steps=5, **kwargs):
+    pred = run_lstm_features(X_train, X_test, y_train, y_test, n_steps=n_steps)
+    return pred, "LSTM-feat"
+
 # Tuning wrapper functions 
 def tune_arima_wrapper(y_train, y_test, **kwargs):
     best_params, pred = grid_search_arima(y_train, y_test)
@@ -124,3 +136,11 @@ def tune_rnn_wrapper(y_train, y_test, n_steps=3, **kwargs):
 def tune_lstm_wrapper(y_train, y_test, n_steps=3, **kwargs):
     best_params, pred, _ = grid_search_lstm(y_train, y_test)
     return pred, "LSTM (Tuned)", best_params
+
+def tune_mlp_wrapper(y_train, y_test, X_train=None, X_test=None, **kwargs):
+    best_params, pred = grid_search_mlp(X_train, X_test, y_train, y_test)
+    return pred, "MLP (Tuned)", best_params
+
+def tune_lstm_feat_wrapper(y_train, y_test, X_train=None, X_test=None, n_steps=5, **kwargs):
+    best_params, pred = grid_search_lstm_features(X_train, X_test, y_train, y_test)
+    return pred, "LSTM-feat (Tuned)", best_params
