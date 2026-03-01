@@ -3,7 +3,7 @@ import pandas as pd
 import logging
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, LSTM, SimpleRNN, Dropout
+from tensorflow.keras.layers import Dense, Input, LSTM, SimpleRNN, Dropout
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping
 from sklearn.preprocessing import StandardScaler
@@ -50,9 +50,11 @@ def create_rnn_model(input_shape, units=50, learning_rate=0.001):
     keras.models.Sequential
         Compiled RNN model
     """
-    model = Sequential()
-    model.add(SimpleRNN(units, activation='relu', input_shape=input_shape))
-    model.add(Dense(1))
+    model = Sequential([
+        Input(shape=input_shape),
+        SimpleRNN(units, activation='relu'),
+        Dense(1),
+    ])
     model.compile(optimizer=Adam(learning_rate=learning_rate), loss='mse')
     return model
 
@@ -107,11 +109,12 @@ def run_rnn(train_data, test_data, n_steps=3):
     for _ in range(len(test_data)):
         # Predict next value
         next_value = model.predict(last_sequence, verbose=0)
-        predictions.append(next_value[0, 0])
+        next_scalar = float(np.squeeze(next_value))
+        predictions.append(next_scalar)
         
-        # Update sequence with the predicted value
+        # Update sequence with the predicted value (must assign scalar, not array)
         last_sequence = np.roll(last_sequence, -1, axis=1)
-        last_sequence[0, -1, 0] = next_value
+        last_sequence[0, -1, 0] = next_scalar
     
     # Inverse transform predictions
     predictions = scaler.inverse_transform(np.array(predictions).reshape(-1, 1)).ravel()
@@ -142,12 +145,11 @@ def create_lstm_model(input_shape, units=50, layers=1, dropout_rate=0.0, learnin
         Compiled LSTM model
     """
     model = Sequential()
-    
+    model.add(Input(shape=input_shape))
     # Add first LSTM layer with return_sequences=True if there are multiple layers
     model.add(LSTM(
         units, 
         activation='relu',
-        input_shape=input_shape,
         return_sequences=(layers > 1)
     ))
     
@@ -186,9 +188,11 @@ def run_lstm(train_data, test_data, n_steps=3):
     X_train = X_train.reshape(X_train.shape[0], X_train.shape[1], 1)
     
     # Build LSTM model
-    model = Sequential()
-    model.add(LSTM(50, activation='relu', input_shape=(n_steps, 1)))
-    model.add(Dense(1))
+    model = Sequential([
+        Input(shape=(n_steps, 1)),
+        LSTM(50, activation='relu'),
+        Dense(1),
+    ])
     model.compile(optimizer=Adam(learning_rate=0.001), loss='mse')
     
     # Early stopping to prevent overfitting
@@ -211,11 +215,12 @@ def run_lstm(train_data, test_data, n_steps=3):
     for _ in range(len(test_data)):
         # Predict next value
         next_value = model.predict(last_sequence, verbose=0)
-        predictions.append(next_value[0, 0])
+        next_scalar = float(np.squeeze(next_value))
+        predictions.append(next_scalar)
         
-        # Update sequence with the predicted value
+        # Update sequence with the predicted value (must assign scalar, not array)
         last_sequence = np.roll(last_sequence, -1, axis=1)
-        last_sequence[0, -1, 0] = next_value
+        last_sequence[0, -1, 0] = next_scalar
     
     # Inverse transform predictions
     predictions = scaler.inverse_transform(np.array(predictions).reshape(-1, 1)).ravel()

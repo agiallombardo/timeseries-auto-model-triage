@@ -33,7 +33,11 @@ def setup_logging(output_dir, log_file='time_series_forecast.log'):
             logging.StreamHandler(sys.stdout)
         ]
     )
-    
+
+    # Reduce noise from Prophet and Stan (MCMC chain progress, daily seasonality messages)
+    for name in ("prophet", "cmdstanpy"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
     # Create and return a named logger for the caller
     logger = logging.getLogger(__name__)
     return logger

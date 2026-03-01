@@ -4,6 +4,7 @@ import os
 import json
 import logging
 import traceback
+import warnings
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -132,7 +133,18 @@ def main():
 def run_models(args, available_models, tuning_functions, X_train, X_test, y_train, y_test, train_df, test_df):
     """Run selected models (without tuning; tuning is done separately for top N)."""
     logger = logging.getLogger(__name__)
-    
+
+    # Suppress noisy warnings during model runs (statsmodels frequency, Keras input_shape)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="No frequency information was provided")
+        warnings.filterwarnings("ignore", message=".*input_shape.*input_dim.*", category=UserWarning)
+        return _run_models_impl(args, available_models, tuning_functions, X_train, X_test, y_train, y_test, train_df, test_df)
+
+
+def _run_models_impl(args, available_models, tuning_functions, X_train, X_test, y_train, y_test, train_df, test_df):
+    """Implementation of run_models (called inside warning filter context)."""
+    logger = logging.getLogger(__name__)
+
     # Default to all models if --models flag is not provided
     models_to_run = list(available_models.keys()) if 'all' in args.models else [m.lower() for m in args.models]
     
@@ -147,8 +159,9 @@ def run_models(args, available_models, tuning_functions, X_train, X_test, y_trai
     # If tune_all is True, perform hyperparameter tuning for all models
     if args.tune_all:
         logger.info("Performing hyperparameter tuning for all models")
+        models_that_will_run = [m for m in models_to_run if m in tuning_functions]
         
-        for model_key in models_to_run:
+        for model_key in models_that_will_run:
             if model_key not in tuning_functions:
                 logger.warning(f"Tuning not implemented for model '{model_key}'. Skipping.")
                 continue
@@ -178,7 +191,8 @@ def run_models(args, available_models, tuning_functions, X_train, X_test, y_trai
                 logger.error(f"Traceback: {traceback.format_exc()}")
     else:
         # Run selected models without tuning
-        for model_key in models_to_run:
+        models_that_will_run = [m for m in models_to_run if m in available_models]
+        for model_key in models_that_will_run:
             if model_key not in available_models:
                 logger.warning(f"Model '{model_key}' not recognized. Skipping.")
                 continue
@@ -355,7 +369,8 @@ def tune_selected_models(args, models_to_tune, tuning_functions,
     # Determine seasonal periods if needed
     seasonal_periods = determine_seasonal_periods(y_train)
     
-    for model_key in models_to_tune:
+    models_that_will_tune = [m for m in models_to_tune if m in tuning_functions]
+    for model_key in models_that_will_tune:
         if model_key not in tuning_functions:
             logger.warning(f"Tuning not implemented for model '{model_key}'. Skipping.")
             continue
