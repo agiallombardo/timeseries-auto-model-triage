@@ -17,6 +17,7 @@ from src.evaluation import (
     create_top_models_plot, create_performance_chart
 )
 from src.models.registry import get_available_models, get_tuning_functions
+from src.losses import LOSS_SUPPORTED_MODELS
 
 # Map display name first word to registry key (for "tune top N" selection)
 DISPLAY_NAME_TO_REGISTRY_KEY = {
@@ -25,7 +26,25 @@ DISPLAY_NAME_TO_REGISTRY_KEY = {
     'random': 'rf',
     'xgboost': 'xgb',
     'lstm-feat': 'lstm_feat',
+    'rnn-feat': 'rnn_feat',
+    'cnn-1d': 'cnn1d',
+    'linear': 'lr',
 }
+
+
+def _parse_display_name(display_name):
+    """Parse 'XGBoost (L2)' -> ('xgb', 'l2'), 'ARIMA' -> ('arima', None)."""
+    parts = display_name.split(" (")
+    base = parts[0].strip()
+    first_word = base.lower().split()[0]
+    model_key = DISPLAY_NAME_TO_REGISTRY_KEY.get(first_word, first_word)
+    if len(parts) > 1:
+        loss_suffix = parts[1].rstrip(")").strip().lower()
+        loss_map = {'l1': 'l1', 'l2': 'l2', 'huber': 'huber', 'quantile': 'quantile'}
+        loss = loss_map.get(loss_suffix, loss_suffix)
+    else:
+        loss = None
+    return model_key, loss
 
 # Module-level logger
 logger = logging.getLogger(__name__)
@@ -42,8 +61,8 @@ def main():
     parser.add_argument('--lags', type=int, default=5, help='Number of lag features for ML models')
     parser.add_argument('--n_steps', type=int, default=3, help='Number of time steps for sequence models (RNN/LSTM)')
     parser.add_argument('--ma_window', type=int, default=3, help='Window size for Moving Average')
-    parser.add_argument('--models', nargs='+', default=['all'], 
-                      help='Models to run (all, arima, sarima, es, prophet, rf, svr, xgb, ma, rnn, lstm, mlp, lstm_feat)')
+    parser.add_argument('--models', nargs='+', default=['all'],
+                        help='Models to run (all, arima, sarima, es, prophet, rf, svr, xgb, ma, lr, rnn, lstm, mlp, lstm_feat, rnn_feat, cnn1d)')
     parser.add_argument('--tune_top', type=int, default=3, 
                    help='Number of top models to tune (default: 3, set to 0 to disable tuning)')
     parser.add_argument('--tune_all', action='store_true', 
@@ -99,22 +118,32 @@ def main():
     models_to_tune = []
     
     if args.tune_all:
-        # Tune all models
-        models_to_tune = list(tuning_functions.keys())
+        # Tune all models: each (model_key, loss) for loss-supported models
+        models_to_tune = []
+        for model_key in tuning_functions:
+            if model_key in LOSS_SUPPORTED_MODELS:
+                for loss_key in LOSS_SUPPORTED_MODELS[model_key]:
+                    models_to_tune.append((model_key, loss_key))
+            else:
+                models_to_tune.append((model_key, None))
     elif args.tune_top > 0:
-        # Get the top N performing models (map display name to registry key)
+        # Top N rows: parse each to (model_key, loss), skip if already tuned
         top_models = results_df.head(args.tune_top)
+        seen = set()
         for _, row in top_models.iterrows():
-            first_word = row['model'].lower().split()[0]
-            model_key = DISPLAY_NAME_TO_REGISTRY_KEY.get(first_word, first_word)
-            if model_key in tuning_functions and 'tuned' not in row['model'].lower():
-                models_to_tune.append(model_key)
+            if 'tuned' in row['model'].lower():
+                continue
+            model_key, loss = _parse_display_name(row['model'])
+            if model_key not in tuning_functions:
+                continue
+            key = (model_key, loss)
+            if key not in seen:
+                seen.add(key)
+                models_to_tune.append(key)
     
-    # Tune selected models
+    # Tune selected models (each entry is (model_key, loss) or (model_key, None))
     if models_to_tune:
-        logger.info(f"Tuning the following models: {', '.join(models_to_tune)}")
-        
-        # Call a function to perform tuning on the selected models
+        logger.info(f"Tuning {len(models_to_tune)} model/loss combination(s)...")
         tuned_predictions, tuned_names, tuned_results = tune_selected_models(
             args, models_to_tune, tuning_functions,
             X_train, X_test, y_train, y_test, train_df, test_df
@@ -157,70 +186,68 @@ def _run_models_impl(args, available_models, tuning_functions, X_train, X_test, 
     # Determine seasonal periods if needed
     seasonal_periods = determine_seasonal_periods(y_train)
     
-    # If tune_all is True, perform hyperparameter tuning for all models
+    # If tune_all is True, perform hyperparameter tuning for all models (each x each loss)
     if args.tune_all:
         logger.info("Performing hyperparameter tuning for all models")
         models_that_will_run = [m for m in models_to_run if m in tuning_functions]
-        
         for model_key in models_that_will_run:
             if model_key not in tuning_functions:
-                logger.warning(f"Tuning not implemented for model '{model_key}'. Skipping.")
                 continue
-                
-            try:
-                logger.info(f"Tuning {model_key.upper()} model...")
-                
-                # Execute tuning function based on model type
-                model_params = {
-                    'y_train': y_train, 
-                    'y_test': y_test,
-                    'X_train': X_train,
-                    'X_test': X_test,
-                    'n_steps': args.n_steps,
-                    'seasonal_periods': seasonal_periods,
-                    'ma_window': args.ma_window
-                }
-                
-                pred, name, best_params = execute_tuning(model_key, tuning_functions, model_params)
-                
-                all_predictions.append(pred)
-                model_names.append(name)
-                results.append(evaluate_model(y_test, pred, name))
-                
-            except Exception as e:
-                logger.error(f"Error tuning {model_key.upper()} model: {e}")
-                logger.error(f"Traceback: {traceback.format_exc()}")
+            losses = LOSS_SUPPORTED_MODELS.get(model_key, [None])
+            for loss_key in losses:
+                try:
+                    logger.info(f"Tuning {model_key.upper()}" + (f" ({loss_key.upper()})" if loss_key else "") + " ...")
+                    model_params = {
+                        'y_train': y_train, 'y_test': y_test,
+                        'X_train': X_train, 'X_test': X_test,
+                        'n_steps': args.n_steps,
+                        'seasonal_periods': seasonal_periods,
+                        'ma_window': args.ma_window,
+                    }
+                    if loss_key is not None:
+                        model_params['loss'] = loss_key
+                    pred, name, best_params = execute_tuning(model_key, tuning_functions, model_params)
+                    all_predictions.append(pred)
+                    model_names.append(name)
+                    results.append(evaluate_model(y_test, pred, name))
+                except Exception as e:
+                    logger.error(f"Error tuning {model_key.upper()}: {e}")
+                    logger.error(traceback.format_exc())
     else:
-        # Run selected models without tuning
+        # Run selected models: for loss-supported models, run once per loss (no CLI; test all)
         models_that_will_run = [m for m in models_to_run if m in available_models]
         for model_key in models_that_will_run:
             if model_key not in available_models:
-                logger.warning(f"Model '{model_key}' not recognized. Skipping.")
                 continue
-                
-            try:
-                logger.info(f"Running {model_key.upper()} model...")
-                
-                # Execute model function based on model type
-                model_params = {
-                    'y_train': y_train, 
-                    'y_test': y_test,
-                    'X_train': X_train,
-                    'X_test': X_test,
-                    'n_steps': args.n_steps,
-                    'seasonal_periods': seasonal_periods,
-                    'ma_window': args.ma_window
-                }
-                
-                pred, name = execute_model(model_key, available_models, model_params)
-                
-                all_predictions.append(pred)
-                model_names.append(name)
-                results.append(evaluate_model(y_test, pred, name))
-                
-            except Exception as e:
-                logger.error(f"Error with {model_key.upper()} model: {e}")
-                logger.error(f"Traceback: {traceback.format_exc()}")
+            base_params = {
+                'y_train': y_train, 'y_test': y_test,
+                'X_train': X_train, 'X_test': X_test,
+                'n_steps': args.n_steps,
+                'seasonal_periods': seasonal_periods,
+                'ma_window': args.ma_window,
+            }
+            if model_key in LOSS_SUPPORTED_MODELS:
+                for loss_key in LOSS_SUPPORTED_MODELS[model_key]:
+                    try:
+                        logger.info(f"Running {model_key.upper()} ({loss_key.upper()})...")
+                        model_params = {**base_params, 'loss': loss_key}
+                        pred, name = execute_model(model_key, available_models, model_params)
+                        all_predictions.append(pred)
+                        model_names.append(name)
+                        results.append(evaluate_model(y_test, pred, name))
+                    except Exception as e:
+                        logger.error(f"Error with {model_key.upper()} ({loss_key}): {e}")
+                        logger.error(traceback.format_exc())
+            else:
+                try:
+                    logger.info(f"Running {model_key.upper()}...")
+                    pred, name = execute_model(model_key, available_models, base_params)
+                    all_predictions.append(pred)
+                    model_names.append(name)
+                    results.append(evaluate_model(y_test, pred, name))
+                except Exception as e:
+                    logger.error(f"Error with {model_key.upper()}: {e}")
+                    logger.error(traceback.format_exc())
     
     return all_predictions, model_names, results
 
@@ -316,10 +343,11 @@ def process_results(args, all_predictions, model_names, results, y_train, y_test
         
         # Add hyperparameters if available (for tuned models, load from saved JSON)
         if 'tuned' in row['model'].lower():
-            first_word = row['model'].lower().split()[0]
-            model_key = DISPLAY_NAME_TO_REGISTRY_KEY.get(first_word, first_word)
+            display_name = row['model'].replace(" (Tuned)", "").strip()
+            model_key, loss_key = _parse_display_name(display_name)
             model_info['tuned'] = True
-            params_file = os.path.join(dataset_results_dir, f"{model_key}_best_params.json")
+            params_suffix = f"{model_key}_{loss_key}" if loss_key else model_key
+            params_file = os.path.join(dataset_results_dir, f"{params_suffix}_best_params.json")
             if os.path.isfile(params_file):
                 try:
                     with open(params_file) as f:
@@ -351,55 +379,44 @@ def process_results(args, all_predictions, model_names, results, y_train, y_test
     for i, (_, row) in enumerate(top_models_df.iterrows()):
         print(f"{i+1}. {row['model']} - RMSE: {row['rmse']:.4f}, MAE: {row['mae']:.4f}, R²: {row['r2']:.4f}")
 
-def tune_selected_models(args, models_to_tune, tuning_functions, 
+def tune_selected_models(args, models_to_tune, tuning_functions,
                         X_train, X_test, y_train, y_test, train_df, test_df):
-    """Tune selected models and return their predictions."""
+    """Tune selected (model_key, loss) combos and return their predictions."""
     logger = logging.getLogger(__name__)
-    
+
     tuned_predictions = []
     tuned_names = []
     tuned_results = []
-    
-    # Get dataset name from file path
+
     dataset_name = os.path.basename(args.file).split('.')[0]
-    
-    # Create results directory with dataset name
     dataset_results_dir = os.path.join(args.output_dir, dataset_name)
     os.makedirs(dataset_results_dir, exist_ok=True)
-    
-    # Determine seasonal periods if needed
     seasonal_periods = determine_seasonal_periods(y_train)
-    
-    models_that_will_tune = [m for m in models_to_tune if m in tuning_functions]
-    for model_key in models_that_will_tune:
-        if model_key not in tuning_functions:
-            logger.warning(f"Tuning not implemented for model '{model_key}'. Skipping.")
-            continue
-            
+
+    # models_to_tune is list of (model_key, loss) or (model_key, None)
+    models_that_will_tune = [(mk, loss) for (mk, loss) in models_to_tune if mk in tuning_functions]
+    for model_key, loss_key in models_that_will_tune:
         try:
-            logger.info(f"Tuning {model_key.upper()} model...")
-            
-            # Execute tuning function based on model type
+            logger.info(f"Tuning {model_key.upper()}" + (f" ({loss_key.upper()})" if loss_key else "") + " ...")
             model_params = {
-                'y_train': y_train, 
-                'y_test': y_test,
-                'X_train': X_train,
-                'X_test': X_test,
+                'y_train': y_train, 'y_test': y_test,
+                'X_train': X_train, 'X_test': X_test,
                 'n_steps': args.n_steps,
                 'seasonal_periods': seasonal_periods,
-                'ma_window': args.ma_window
+                'ma_window': args.ma_window,
             }
-            
+            if loss_key is not None:
+                model_params['loss'] = loss_key
+
             pred, name, best_params = execute_tuning(model_key, tuning_functions, model_params)
-            
             tuned_predictions.append(pred)
             tuned_names.append(name)
             tuned_results.append(evaluate_model(y_test, pred, name))
-            
-            # Save best parameters to file - in dataset-specific directory
-            params_file = os.path.join(dataset_results_dir, f"{model_key}_best_params.json")
+
+            params_suffix = f"{model_key}_{loss_key}" if loss_key else model_key
+            params_file = os.path.join(dataset_results_dir, f"{params_suffix}_best_params.json")
             with open(params_file, 'w') as f:
-                json.dump(best_params, f, indent=4)
+                json.dump(best_params if best_params is not None else {}, f, indent=4)
                 
             logger.info(f"Best parameters for {model_key.upper()} saved to {params_file}")
             
