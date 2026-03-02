@@ -13,8 +13,8 @@ from datetime import datetime
 from src.utils import setup_logging
 from src.data_handling import load_data, prepare_features, split_data
 from src.evaluation import (
-    evaluate_model, plot_results, create_trellis_plot, 
-    create_top_models_plot, create_performance_chart
+    evaluate_model, plot_results, create_trellis_plot,
+    create_top_models_plot, create_performance_chart, compute_best_judgment
 )
 from src.models.registry import get_available_models, get_tuning_functions
 from src.losses import LOSS_SUPPORTED_MODELS
@@ -110,10 +110,10 @@ def main():
         X_train, X_test, y_train, y_test, train_df, test_df
     )
     
-    # Create initial results DataFrame
+    # Create initial results DataFrame and compute composite scores for ranking
     results_df = pd.DataFrame(results)
-    results_df = results_df.sort_values('rmse')
-    
+    _, _, results_df = compute_best_judgment(results_df)
+
     # Determine which models to tune
     models_to_tune = []
     
@@ -209,7 +209,7 @@ def _run_models_impl(args, available_models, tuning_functions, X_train, X_test, 
                     pred, name, best_params = execute_tuning(model_key, tuning_functions, model_params)
                     all_predictions.append(pred)
                     model_names.append(name)
-                    results.append(evaluate_model(y_test, pred, name))
+                    results.append(evaluate_model(y_test, pred, name, y_train))
                 except Exception as e:
                     logger.error(f"Error tuning {model_key.upper()}: {e}")
                     logger.error(traceback.format_exc())
@@ -234,7 +234,7 @@ def _run_models_impl(args, available_models, tuning_functions, X_train, X_test, 
                         pred, name = execute_model(model_key, available_models, model_params)
                         all_predictions.append(pred)
                         model_names.append(name)
-                        results.append(evaluate_model(y_test, pred, name))
+                        results.append(evaluate_model(y_test, pred, name, y_train))
                     except Exception as e:
                         logger.error(f"Error with {model_key.upper()} ({loss_key}): {e}")
                         logger.error(traceback.format_exc())
@@ -244,7 +244,7 @@ def _run_models_impl(args, available_models, tuning_functions, X_train, X_test, 
                     pred, name = execute_model(model_key, available_models, base_params)
                     all_predictions.append(pred)
                     model_names.append(name)
-                    results.append(evaluate_model(y_test, pred, name))
+                    results.append(evaluate_model(y_test, pred, name, y_train))
                 except Exception as e:
                     logger.error(f"Error with {model_key.upper()}: {e}")
                     logger.error(traceback.format_exc())
@@ -266,16 +266,16 @@ def process_results(args, all_predictions, model_names, results, y_train, y_test
     dataset_results_dir = os.path.join(args.output_dir, dataset_name)
     os.makedirs(dataset_results_dir, exist_ok=True)
     
-    # Create a results DataFrame
+    # Create a results DataFrame and compute holistic best judgment
     results_df = pd.DataFrame(results)
-    results_df = results_df.sort_values('rmse')
-    
-    # Save basic results to CSV
+    best_row, judgment_text, results_df = compute_best_judgment(results_df)
+
+    # Save basic results to CSV (includes composite_score)
     results_csv_path = os.path.join(dataset_results_dir, 'model_comparison_results.csv')
     results_df.to_csv(results_csv_path, index=False)
     logger.info(f"Results saved to '{results_csv_path}'")
     
-    # Get top 3 models
+    # Get top 3 models (sorted by composite score)
     top_models_df = results_df.head(3)
     top_model_names = top_models_df['model'].tolist()
     
@@ -309,12 +309,11 @@ def process_results(args, all_predictions, model_names, results, y_train, y_test
         os.path.join(dataset_results_dir, 'model_performance.png')
     )
     
-    # Determine the best model
-    best_model_result = min(results, key=lambda x: x['rmse'])
-    best_model_name = best_model_result['model']
+    # Best model from composite judgment
+    best_model_name = best_row['model']
     best_model_key = best_model_name.lower().split()[0]
-    
-    logger.info(f"\nBest model: {best_model_name} with RMSE: {best_model_result['rmse']:.4f}")
+
+    logger.info(f"\nBest model: {best_model_name} (composite: {best_row['composite_score']:.3f}, RMSE: {best_row['rmse']:.4f})")
     
     # Save top models information
     top_models_info = {}
@@ -331,15 +330,21 @@ def process_results(args, all_predictions, model_names, results, y_train, y_test
     }
     
     # Add model information
+    top_models_info['best_judgment'] = judgment_text
     top_models_info['models'] = []
     for idx, (_, row) in enumerate(top_models_df.iterrows()):
         model_info = {
             'rank': idx + 1,
             'name': row['model'],
+            'composite_score': float(row['composite_score']),
             'rmse': float(row['rmse']),
             'mae': float(row['mae']),
             'r2': float(row['r2'])
         }
+        if 'mase' in row and not (pd.isna(row['mase']) or np.isinf(row['mase'])):
+            model_info['mase'] = float(row['mase'])
+        if 'mape' in row and not (pd.isna(row['mape']) or np.isinf(row['mape'])):
+            model_info['mape'] = float(row['mape'])
         
         # Add hyperparameters if available (for tuned models, load from saved JSON)
         if 'tuned' in row['model'].lower():
@@ -371,13 +376,27 @@ def process_results(args, all_predictions, model_names, results, y_train, y_test
     
     # Display final results
     logger.info("\nFinal Model Comparison Results:")
-    print("\nModel Performance Summary (sorted by RMSE):")
-    print(results_df[['model', 'rmse', 'mae', 'r2']].to_string(index=False))
-    
+    display_cols = ['model', 'composite_score', 'rmse', 'mae', 'r2']
+    optional = [c for c in ['mase', 'mape'] if c in results_df.columns]
+    display_cols = [c for c in display_cols if c in results_df.columns] + optional
+    print("\nModel Performance Summary (sorted by composite score):")
+    print(results_df[display_cols].to_string(index=False))
+
+    # Best judgment
+    print("\n" + "=" * 60)
+    print("Best judgment:")
+    print(judgment_text)
+    print("=" * 60)
+
     # Print top 3 models summary
     print("\nTop 3 Models:")
     for i, (_, row) in enumerate(top_models_df.iterrows()):
-        print(f"{i+1}. {row['model']} - RMSE: {row['rmse']:.4f}, MAE: {row['mae']:.4f}, R²: {row['r2']:.4f}")
+        extra = ""
+        if 'mase' in row and not (pd.isna(row['mase']) or np.isinf(row['mase'])):
+            extra += f", MASE: {row['mase']:.3f}"
+        if 'mape' in row and not (pd.isna(row['mape']) or np.isinf(row['mape'])):
+            extra += f", MAPE: {row['mape']:.2f}%"
+        print(f"{i+1}. {row['model']} - composite: {row['composite_score']:.3f}, RMSE: {row['rmse']:.4f}, MAE: {row['mae']:.4f}, R²: {row['r2']:.4f}{extra}")
 
 def tune_selected_models(args, models_to_tune, tuning_functions,
                         X_train, X_test, y_train, y_test, train_df, test_df):
@@ -411,7 +430,7 @@ def tune_selected_models(args, models_to_tune, tuning_functions,
             pred, name, best_params = execute_tuning(model_key, tuning_functions, model_params)
             tuned_predictions.append(pred)
             tuned_names.append(name)
-            tuned_results.append(evaluate_model(y_test, pred, name))
+            tuned_results.append(evaluate_model(y_test, pred, name, y_train))
 
             params_suffix = f"{model_key}_{loss_key}" if loss_key else model_key
             params_file = os.path.join(dataset_results_dir, f"{params_suffix}_best_params.json")
