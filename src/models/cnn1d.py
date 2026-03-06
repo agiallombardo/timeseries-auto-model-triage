@@ -24,10 +24,11 @@ def run_cnn1d(X_train, X_test, y_train, y_test, n_steps=5, loss='l2'):
     X_tr_seq = scaler.transform(X_tr_seq.reshape(-1, n_features)).reshape(X_tr_seq.shape)
     X_te_seq = scaler.transform(X_te_seq.reshape(-1, n_features)).reshape(X_te_seq.shape)
 
+    # kernel_size=2 so small n_steps (e.g. 3) still yield positive length after two Conv1D layers
     model = Sequential([
         Input(shape=(n_steps, n_features)),
-        Conv1D(64, 3, activation='relu'),
-        Conv1D(32, 3, activation='relu'),
+        Conv1D(64, 2, activation='relu'),
+        Conv1D(32, 2, activation='relu'),
         GlobalAveragePooling1D(),
         Dense(1),
     ])
