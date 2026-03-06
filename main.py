@@ -347,7 +347,8 @@ def _run_models_impl(args, default_setup, available_models, tuning_functions, X_
                 model_params.update(variation_spec)
                 loss_key = variation_spec.get("loss")
                 logger.info(
-                    f"Running {model_key.upper()}" + (f" ({loss_key.upper()})" if loss_key else "")
+                    f"Running {model_key.upper()}" + (f" ({loss_key.upper()})" if loss_key else "") + " ..."
+                )
                 run_results = []
                 run_preds = []
                 for run_idx in range(n_runs):
