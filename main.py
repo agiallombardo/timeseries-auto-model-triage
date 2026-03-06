@@ -124,52 +124,6 @@ def _dataset_results_dir(args):
     return os.path.join(args.output_dir, dataset_name, date_str)
 
 
-def _row_to_csv_ready(row, json_cols):
-    """Convert a dict to CSV-ready dict: serialize listed keys to JSON strings."""
-    out = {}
-    for k, v in row.items():
-        if k in json_cols and isinstance(v, (dict, list)):
-            out[k] = json.dumps(v) if v is not None else ""
-        else:
-            out[k] = v
-    return out
-
-
-def _write_configs_csv(configs, path):
-    """Write list of config dicts to CSV (nested dicts as JSON strings)."""
-    if not configs:
-        return
-    json_cols = {"setup", "time_steps", "normalization", "shape_and_reshaping", "variation_spec", "hyperparameters"}
-    rows = [_row_to_csv_ready(c, json_cols) for c in configs]
-    keys = list(rows[0].keys()) if rows else []
-    pd.DataFrame(rows)[keys].to_csv(path, index=False)
-
-
-def _write_summary_csvs(dataset_results_dir, dataset_info, best_judgment, best_per_run, top_models, tuned_best_params):
-    """Write results summary as CSV files instead of a single JSON."""
-    # Dataset + best judgment
-    row = dict(dataset_info)
-    row["best_judgment"] = best_judgment
-    pd.DataFrame([row]).to_csv(os.path.join(dataset_results_dir, "dataset_info.csv"), index=False)
-
-    # Best per run
-    if best_per_run:
-        json_cols = {"variation_spec", "hyperparameters"}
-        rows = [_row_to_csv_ready(r, json_cols) for r in best_per_run]
-        pd.DataFrame(rows).to_csv(os.path.join(dataset_results_dir, "best_per_run.csv"), index=False)
-
-    # Top models
-    if top_models:
-        json_cols = {"variation_spec", "hyperparameters"}
-        rows = [_row_to_csv_ready(r, json_cols) for r in top_models]
-        pd.DataFrame(rows).to_csv(os.path.join(dataset_results_dir, "top_models.csv"), index=False)
-
-    # Tuned best params (model_key -> hyperparameters)
-    if tuned_best_params:
-        rows = [{"model_key": k, "hyperparameters": json.dumps(v) if isinstance(v, dict) else str(v)} for k, v in tuned_best_params.items()]
-        pd.DataFrame(rows).to_csv(os.path.join(dataset_results_dir, "tuned_best_params.csv"), index=False)
-
-
 def _get_losses_for_model(model_key, requested_losses):
     """Return the list of loss keys to run for this model. requested_losses is from args.losses (None = all)."""
     if model_key not in LOSS_SUPPORTED_MODELS:
@@ -505,7 +459,7 @@ def _base_params(default_setup, model_key, y_train, y_test, X_train, X_test, sea
     }
 
 def process_results(args, default_setup, all_predictions, model_names, results, run_configs, best_per_run, y_train, y_test, X_train, X_test, tuning_functions, tuned_best_params=None):
-    """Process and display results. Saves model_configs.csv and summary CSVs (dataset_info, best_per_run, top_models, tuned_best_params)."""
+    """Process and display results. Saves model_configs.json and results_summary.json (single file, no redundancy)."""
     logger = logging.getLogger(__name__)
 
     if not all_predictions:
@@ -537,11 +491,12 @@ def process_results(args, default_setup, all_predictions, model_names, results, 
         agg_list.append(row)
     results_df_agg = pd.DataFrame(agg_list).sort_values('composite_score', ascending=False).reset_index(drop=True)
 
-    # Save model configs as CSV (same order as results; one row per model, best variation first)
+    # Save model configs as JSON (same order as results; one per model, best variation first)
     if run_configs:
         ordered_configs = [run_configs[int(row["best_variation_index"])] for _, row in results_df_agg.iterrows() if int(row["best_variation_index"]) < len(run_configs)]
-        configs_path = os.path.join(dataset_results_dir, "model_configs.csv")
-        _write_configs_csv(ordered_configs, configs_path)
+        configs_path = os.path.join(dataset_results_dir, "model_configs.json")
+        with open(configs_path, "w") as f:
+            json.dump(ordered_configs, f, indent=2)
         logger.info(f"Model configs saved to '{configs_path}'")
 
     # Save aggregated results (one row per model); column order matches report
@@ -602,15 +557,13 @@ def process_results(args, default_setup, all_predictions, model_names, results, 
         'testing_samples': len(y_test)
     }
     
-    # Add model information (median metrics; params from best variation)
-    top_models_info['best_judgment'] = judgment_text
-    top_models_info['models'] = []
-    for idx, (_, row) in enumerate(top_models_df.iterrows()):
+    # Single results summary JSON: dataset, best_judgment, results (all models in order; no separate top_models), best_per_run, tuned_best_params
+    results_list = []
+    for _, row in results_df_agg.iterrows():
         best_idx = int(row['best_variation_index'])
         cfg = run_configs[best_idx] if best_idx < len(run_configs) else {}
-        model_info = {
-            'rank': idx + 1,
-            'name': row['model'],
+        entry = {
+            'model': row['model'],
             'composite_score': float(row['composite_score']),
             'rmse': float(row['rmse']),
             'mae': float(row['mae']),
@@ -619,21 +572,24 @@ def process_results(args, default_setup, all_predictions, model_names, results, 
             'hyperparameters': cfg.get('hyperparameters', {}),
         }
         if 'mase' in row and not (pd.isna(row['mase']) or np.isinf(row['mase'])):
-            model_info['mase'] = float(row['mase'])
+            entry['mase'] = float(row['mase'])
         if 'mape' in row and not (pd.isna(row['mape']) or np.isinf(row['mape'])):
-            model_info['mape'] = float(row['mape'])
-        top_models_info['models'].append(model_info)
+            entry['mape'] = float(row['mape'])
+        results_list.append(entry)
 
-    # Summary as CSV files (dataset_info, best_per_run, top_models, tuned_best_params)
-    _write_summary_csvs(
-        dataset_results_dir,
-        top_models_info["dataset"],
-        top_models_info["best_judgment"],
-        best_per_run,
-        top_models_info["models"],
-        tuned_best_params if tuned_best_params else {},
-    )
-    logger.info(f"Results summary saved to CSVs in '{dataset_results_dir}'")
+    results_summary = {
+        "dataset": top_models_info["dataset"],
+        "best_judgment": judgment_text,
+        "results": results_list,
+    }
+    if best_per_run:
+        results_summary["best_per_run"] = best_per_run
+    if tuned_best_params:
+        results_summary["tuned_best_params"] = tuned_best_params
+    summary_path = os.path.join(dataset_results_dir, "results_summary.json")
+    with open(summary_path, "w") as f:
+        json.dump(results_summary, f, indent=2)
+    logger.info(f"Results summary saved to '{summary_path}'")
 
     # Console report (same column order and formatting as CSV)
     _print_results_report(results_df_agg, top_models_df, judgment_text)
