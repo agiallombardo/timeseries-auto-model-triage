@@ -333,44 +333,57 @@ def _run_models_impl(args, default_setup, available_models, tuning_functions, X_
                     logger.error(traceback.format_exc())
         return all_predictions, model_names, results, run_configs
 
-    # Default: run exactly 3 variations per model, each variation run n_runs times; rerank by mean metrics
+    # Default: loop the entire program n_runs times, then aggregate and rerank by mean metrics
     n_runs = default_setup.get("n_runs", 3)
-    for model_key in models_to_run:
-        if model_key not in available_models:
-            continue
-        variations = get_variations_for_model(model_key)
-        metadata = get_metadata_for_model(model_key)
-        default_hp = dict(metadata.get("default_hyperparameters", {})) if metadata else {}
-        for variation_index, variation_spec in enumerate(variations):
-            try:
-                model_params = _base_params(default_setup, model_key, y_train, y_test, X_train, X_test, seasonal_periods)
-                model_params.update(variation_spec)
-                loss_key = variation_spec.get("loss")
-                logger.info(
-                    f"Running {model_key.upper()}" + (f" ({loss_key.upper()})" if loss_key else "") + " ..."
-                )
-                run_results = []
-                run_preds = []
-                for run_idx in range(n_runs):
-                    logger.info(f"  Run {run_idx + 1}/{n_runs} ...")
+    all_runs_preds = []
+    all_runs_results = []
+    first_run_names = []
+
+    for run_idx in range(n_runs):
+        logger.info(f"=== Program run {run_idx + 1}/{n_runs} ===")
+        run_preds = []
+        run_results = []
+        for model_key in models_to_run:
+            if model_key not in available_models:
+                continue
+            variations = get_variations_for_model(model_key)
+            metadata = get_metadata_for_model(model_key)
+            default_hp = dict(metadata.get("default_hyperparameters", {})) if metadata else {}
+            for variation_index, variation_spec in enumerate(variations):
+                try:
+                    model_params = _base_params(default_setup, model_key, y_train, y_test, X_train, X_test, seasonal_periods)
+                    model_params.update(variation_spec)
+                    loss_key = variation_spec.get("loss")
+                    logger.info(
+                        f"Running {model_key.upper()}" + (f" ({loss_key.upper()})" if loss_key else "") + " ..."
+                    )
                     pred, name = execute_model(model_key, available_models, model_params)
                     run_preds.append(np.asarray(pred))
                     run_results.append(evaluate_model(y_test, pred, name, y_train))
-                # Aggregate: mean metrics and mean predictions; ranking uses mean metrics
-                mean_pred = np.mean(run_preds, axis=0)
-                agg = _aggregate_run_results(run_results, name)
-                all_predictions.append(mean_pred)
-                model_names.append(name)
-                results.append(agg)
-                hp = {**default_hp, **variation_spec}
-                run_configs.append(_build_run_config(
-                    args, default_setup, model_key, variation_index, variation_spec,
-                    name, tuned=False, hyperparameters=hp, metadata=metadata,
-                    n_train=len(y_train), n_test=len(y_test),
-                ))
-            except Exception as e:
-                logger.error(f"Error with {model_key.upper()} (variation {variation_index}): {e}")
-                logger.error(traceback.format_exc())
+                    if run_idx == 0:
+                        first_run_names.append(name)
+                        run_configs.append(_build_run_config(
+                            args, default_setup, model_key, variation_index, variation_spec,
+                            name, tuned=False, hyperparameters={**default_hp, **variation_spec}, metadata=metadata,
+                            n_train=len(y_train), n_test=len(y_test),
+                        ))
+                except Exception as e:
+                    logger.error(f"Error with {model_key.upper()} (variation {variation_index}): {e}")
+                    logger.error(traceback.format_exc())
+        all_runs_preds.append(run_preds)
+        all_runs_results.append(run_results)
+
+    # Aggregate across program runs: mean metrics and mean predictions per model; rerank by mean metrics
+    n_models = len(first_run_names)
+    for i in range(n_models):
+        name = first_run_names[i]
+        result_dicts = [all_runs_results[r][i] for r in range(n_runs) if i < len(all_runs_results[r])]
+        pred_arrays = [all_runs_preds[r][i] for r in range(n_runs) if i < len(all_runs_preds[r])]
+        if not result_dicts or not pred_arrays:
+            continue
+        all_predictions.append(np.mean(pred_arrays, axis=0))
+        model_names.append(name)
+        results.append(_aggregate_run_results(result_dicts, name))
 
     return all_predictions, model_names, results, run_configs
 
