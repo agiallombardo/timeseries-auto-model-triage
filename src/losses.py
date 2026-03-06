@@ -104,7 +104,7 @@ def get_linear_model(loss_key, quantile=0.5):
     if loss_key == 'l1':
         return Lasso(alpha=0.01, max_iter=10000)
     if loss_key == 'huber':
-        return HuberRegressor(max_iter=200)
+        return HuberRegressor(max_iter=2000)
     if loss_key == 'quantile':
         return QuantileRegressor(quantile=quantile, alpha=0.0,
                                  solver='highs')

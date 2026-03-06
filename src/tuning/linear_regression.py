@@ -4,6 +4,7 @@ import pandas as pd
 from sklearn.linear_model import Ridge, Lasso, HuberRegressor, QuantileRegressor
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import mean_squared_error
+from sklearn.preprocessing import StandardScaler
 
 from ..models.linear_regression import run_linear_regression
 
@@ -53,11 +54,16 @@ def grid_search_linear_regression(X_train, X_test, y_train, y_test, loss='l2'):
             model.fit(X_train, y_train)
             best_predictions = model.predict(X_test)
     elif loss == 'huber':
+        scaler = StandardScaler()
+        X_train_sc = scaler.fit_transform(X_train)
+        X_test_sc = scaler.transform(X_test)
+        X_train_sc = pd.DataFrame(X_train_sc, index=X_train.index, columns=X_train.columns)
+        X_test_sc = pd.DataFrame(X_test_sc, index=X_test.index, columns=X_test.columns)
         for epsilon in [1.0, 1.35, 2.0]:
-            model = HuberRegressor(epsilon=epsilon, max_iter=200)
+            model = HuberRegressor(epsilon=epsilon, max_iter=2000)
             rmses = []
-            for train_idx, val_idx in tscv.split(X_train):
-                X_t, X_v = X_train.iloc[train_idx], X_train.iloc[val_idx]
+            for train_idx, val_idx in tscv.split(X_train_sc):
+                X_t, X_v = X_train_sc.iloc[train_idx], X_train_sc.iloc[val_idx]
                 y_t, y_v = y_train.iloc[train_idx], y_train.iloc[val_idx]
                 model.fit(X_t, y_t)
                 rmses.append(np.sqrt(mean_squared_error(y_v, model.predict(X_v))))
@@ -66,9 +72,9 @@ def grid_search_linear_regression(X_train, X_test, y_train, y_test, loss='l2'):
                 best_rmse = rmse
                 best_params = {'epsilon': epsilon}
         if best_params is not None:
-            model = HuberRegressor(**best_params, max_iter=200)
-            model.fit(X_train, y_train)
-            best_predictions = model.predict(X_test)
+            model = HuberRegressor(**best_params, max_iter=2000)
+            model.fit(X_train_sc, y_train)
+            best_predictions = model.predict(X_test_sc)
     else:
         best_predictions = run_linear_regression(X_train, X_test, y_train, loss=loss)
         best_params = {'quantile': 0.5}
