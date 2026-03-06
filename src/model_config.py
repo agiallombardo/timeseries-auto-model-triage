@@ -10,15 +10,20 @@ Variation axes (settings tested to find best output):
 - Training: optimizer, batch_size, epochs (in tuning).
 """
 
-# Default setup used for running and for saved config (no CLI override)
+# Default setup: single value used when one is needed (e.g. feature build); 3 variations tested per model
+# Option lists define the 3 possibilities tested to find the best (see VARIATIONS_PER_MODEL).
 DEFAULT_SETUP = {
     "test_size": 0.2,
-    "lags": 5,
+    "lags": 5,                          # middle of 3 tested; options [3, 5, 7] for ML feature lags
+    "lags_options": [3, 5, 7],
     "rolling_window": 3,
-    "n_steps_univariate": 3,   # RNN, LSTM
-    "n_steps_feature": 5,      # LSTM-feat, RNN-feat, CNN-1D
-    "ma_window": 3,
-    "n_runs": 3,               # run each (model, variation) this many times; rerank by mean metrics
+    "n_steps_univariate": 5,            # middle of 3 tested; options [3, 5, 10] for RNN/LSTM
+    "n_steps_univariate_options": [3, 5, 10],
+    "n_steps_feature": 5,               # middle of 3 tested; options [3, 5, 7] for LSTM-feat, RNN-feat, CNN-1D
+    "n_steps_feature_options": [3, 5, 7],
+    "ma_window": 5,                     # middle of 3 tested; options [3, 5, 7] for MA
+    "ma_window_options": [3, 5, 7],
+    "n_runs": 3,                        # run each (model, variation) this many times; rerank by mean metrics
 }
 
 # Exactly 3 variation specs per model (aligned to what each model supports)

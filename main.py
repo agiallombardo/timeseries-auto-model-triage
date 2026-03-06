@@ -226,21 +226,19 @@ logger = logging.getLogger(__name__)
 def main():
 
     """Main function to run the time series forecasting comparison."""
-    parser = argparse.ArgumentParser(description='Time Series Forecasting Model Comparison')
+    parser = argparse.ArgumentParser(
+        description='Time Series Forecasting Model Comparison. Each model runs 3 variations (different params) to find the best.'
+    )
     parser.add_argument('--file', required=True, help='Path to the data file')
     parser.add_argument('--time_col', required=True, help='Name of the time/date column')
     parser.add_argument('--data_col', required=True, help='Name of the data column to forecast')
     parser.add_argument('--date_format', help='Format of the date string (if needed)')
-    parser.add_argument('--test_size', type=float, default=0.2, help='Proportion of data to use for testing')
-    parser.add_argument('--lags', type=int, default=5, help='Number of lag features for ML models')
-    parser.add_argument('--n_steps', type=int, default=3, help='Number of time steps for sequence models (RNN/LSTM)')
-    parser.add_argument('--ma_window', type=int, default=3, help='Window size for Moving Average')
     parser.add_argument('--models', nargs='+', default=['all'],
                         help='Models to run (all, arima, sarima, es, prophet, rf, svr, xgb, ma, lr, rnn, lstm, mlp, lstm_feat, rnn_feat, cnn1d)')
     parser.add_argument('--losses', nargs='+', default=None,
                         help='Loss variants to run (default: all). Choices: l1, l2, huber, quantile. Only applies to models that support losses.')
-    parser.add_argument('--tune_top', type=int, default=3, 
-                   help='Number of top models to tune (default: 3, set to 0 to disable tuning)')
+    parser.add_argument('--tune_top', type=int, default=3,
+                        help='Number of top models to tune (default: 3, set to 0 to disable tuning)')
     parser.add_argument('--tune_all', action='store_true', 
                    help='Tune all models instead of just the top performing ones')
     parser.add_argument('--output_dir', default='results', help='Directory to save results')
@@ -268,7 +266,7 @@ def main():
     logger.info(f"Data column: {args.data_col}")
 
     default_setup = get_default_setup()
-    logger.info(f"Using default setup: test_size={default_setup['test_size']}, lags={default_setup['lags']}")
+    logger.info(f"Setup: test_size={default_setup['test_size']}, lags={default_setup['lags']}, n_steps={default_setup.get('n_steps_univariate')}, ma_window={default_setup['ma_window']} (3 variations per model)")
 
     # Load and prepare data (use default setup, not CLI)
     try:
