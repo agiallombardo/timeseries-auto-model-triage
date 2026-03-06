@@ -230,10 +230,10 @@ def plot_results(y_train, y_test, predictions, model_names, save_path='forecast_
     
     logger.info(f"Forecast comparison plot saved as '{save_path}'")
 
-def create_trellis_plot(y_train, y_test, predictions, model_names, results_df, save_path='trellis_plot.png'):
+def create_trellis_plot(y_train, y_test, predictions, model_names, results_df, save_path='trellis_plot.png', max_models=9):
     """
-    Create a trellis plot showing each model's predictions separately.
-    
+    Create a trellis plot showing the top models' predictions in a 3x3 grid.
+
     Parameters:
     -----------
     y_train : Series
@@ -248,34 +248,25 @@ def create_trellis_plot(y_train, y_test, predictions, model_names, results_df, s
         DataFrame with model performance metrics
     save_path : str
         Path to save the plot
+    max_models : int
+        Maximum number of models to show (default 9, in a 3x3 grid)
     """
     # Sort models by performance (composite score if available, else RMSE)
     sort_col = 'composite_score' if 'composite_score' in results_df.columns else 'rmse'
     ascending = False if sort_col == 'composite_score' else True
-    sorted_indices = results_df.sort_values(sort_col, ascending=ascending).index.values
+    sorted_df = results_df.sort_values(sort_col, ascending=ascending)
+    sorted_indices = sorted_df.index.values[:max_models]
     sorted_predictions = [predictions[i] for i in sorted_indices]
     sorted_model_names = [model_names[i] for i in sorted_indices]
-    
-    # Calculate grid dimensions
     n_models = len(sorted_model_names)
-    cols = min(3, n_models)
-    rows = (n_models + cols - 1) // cols  # Ceiling division
-    
-    # Create figure
-    fig, axes = plt.subplots(rows, cols, figsize=(15, 4*rows), sharex=True, sharey=True)
-    
-    # Flatten axes for easier iteration if there are multiple rows and columns
-    if rows > 1 and cols > 1:
-        axes = axes.flatten()
-    elif rows == 1 and cols > 1:
-        axes = np.array([axes])  # Make 1D array into 2D
-    elif cols == 1 and rows > 1:
-        axes = axes.reshape(-1, 1)  # Ensure axes is 2D
-    else:
-        axes = np.array([[axes]])  # Single plot case
-    
-    # Plot data for each model
-    for i, (pred, name, ax) in enumerate(zip(sorted_predictions, sorted_model_names, axes.flatten())):
+
+    # Fixed 3x3 grid for top 9
+    rows, cols = 3, 3
+    fig, axes = plt.subplots(rows, cols, figsize=(15, 12), sharex=True, sharey=True)
+    axes = axes.flatten()
+
+    # Plot data for each of the top models
+    for i, (pred, name, ax) in enumerate(zip(sorted_predictions, sorted_model_names, axes)):
         # Get metrics
         model_metrics = results_df[results_df['model'] == name].iloc[0]
         rmse = model_metrics['rmse']
@@ -296,7 +287,7 @@ def create_trellis_plot(y_train, y_test, predictions, model_names, results_df, s
             ax.legend(loc='upper left')
             
         # Add x-label only to bottom row
-        if i >= n_models - cols:
+        if i >= (rows - 1) * cols:
             ax.set_xlabel('Date')
             
         # Add y-label only to leftmost column
@@ -305,13 +296,13 @@ def create_trellis_plot(y_train, y_test, predictions, model_names, results_df, s
             
         # Add grid
         ax.grid(True, alpha=0.3)
-    
-    # Hide unused subplots
-    for i in range(n_models, len(axes.flatten())):
-        axes.flatten()[i].set_visible(False)
+
+    # Hide unused subplots (if fewer than 9 models)
+    for i in range(n_models, len(axes)):
+        axes[i].set_visible(False)
     
     # Add overall title
-    plt.suptitle('Model Comparison - Individual Model Performance', fontsize=16)
+    plt.suptitle('Top 9 Models (3×3) - Individual Performance', fontsize=16)
     plt.tight_layout()
     plt.subplots_adjust(top=0.92)  # Make room for suptitle
     

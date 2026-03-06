@@ -68,7 +68,7 @@ Each dataset's results are saved in a dedicated directory (results/{dataset_name
 - model_performance.png - Bar charts comparing metrics across models
 - model_comparison_results.csv - Tabular performance metrics
 - top_models_info.json - Details about the top models and dataset
-- {model}_best_params.json - Optimized parameters for tuned models
+- tuned_best_params.json - Optimized parameters for all tuned models (single file)
 
 ## Supported Models
 

@@ -251,9 +251,17 @@ def main():
         model_names.extend(tuned_names)
         results.extend(tuned_results)
     
-    # Append run configs for tuned models (if any)
+    # Append run configs for tuned models (if any); load from single tuned_best_params.json
     if models_to_tune:
         dataset_results_dir = _dataset_results_dir(args)
+        single_params_path = os.path.join(dataset_results_dir, "tuned_best_params.json")
+        all_tuned_params = {}
+        if os.path.isfile(single_params_path):
+            try:
+                with open(single_params_path) as f:
+                    all_tuned_params = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                pass
         for i, name in enumerate(tuned_names):
             if " (Tuned)" not in name:
                 continue
@@ -261,14 +269,7 @@ def main():
             model_key, loss_key = _parse_display_name(display_name)
             metadata = get_metadata_for_model(model_key)
             params_suffix = f"{model_key}_{loss_key}" if loss_key else model_key
-            params_file = os.path.join(dataset_results_dir, f"{params_suffix}_best_params.json")
-            best_params = {}
-            if os.path.isfile(params_file):
-                try:
-                    with open(params_file) as f:
-                        best_params = json.load(f)
-                except (json.JSONDecodeError, OSError):
-                    pass
+            best_params = all_tuned_params.get(params_suffix, {})
             if isinstance(best_params, int):
                 best_params = {"window": best_params}
             run_configs.append(_build_run_config(
@@ -529,22 +530,25 @@ def process_results(args, default_setup, all_predictions, model_names, results, 
         if 'mape' in row and not (pd.isna(row['mape']) or np.isinf(row['mape'])):
             model_info['mape'] = float(row['mape'])
         
-        # Add hyperparameters if available (for tuned models, load from saved JSON)
+        # Add hyperparameters if available (for tuned models, from single tuned_best_params.json)
         if 'tuned' in row['model'].lower():
             display_name = row['model'].replace(" (Tuned)", "").strip()
             model_key, loss_key = _parse_display_name(display_name)
             model_info['tuned'] = True
             params_suffix = f"{model_key}_{loss_key}" if loss_key else model_key
-            params_file = os.path.join(dataset_results_dir, f"{params_suffix}_best_params.json")
-            if os.path.isfile(params_file):
+            single_params_path = os.path.join(dataset_results_dir, "tuned_best_params.json")
+            best_params = None
+            if os.path.isfile(single_params_path):
                 try:
-                    with open(params_file) as f:
-                        model_info["hyperparameters"] = json.load(f)
-                    if isinstance(model_info["hyperparameters"], int):
-                        model_info["hyperparameters"] = {"window": model_info["hyperparameters"]}
-                except (json.JSONDecodeError, OSError) as e:
-                    logger.warning(f"Could not load hyperparameters from {params_file}: {e}")
-                    model_info["hyperparameters"] = None
+                    with open(single_params_path) as f:
+                        all_tuned = json.load(f)
+                    best_params = all_tuned.get(params_suffix)
+                except (json.JSONDecodeError, OSError):
+                    pass
+            if best_params is not None:
+                if isinstance(best_params, int):
+                    best_params = {"window": best_params}
+                model_info["hyperparameters"] = best_params
             else:
                 model_info["hyperparameters"] = None
         else:
@@ -597,6 +601,7 @@ def tune_selected_models(args, default_setup, models_to_tune, tuning_functions,
     seasonal_periods = determine_seasonal_periods(y_train)
 
     # models_to_tune is list of (model_key, loss) or (model_key, None)
+    all_tuned_params = {}
     models_that_will_tune = [(mk, loss) for (mk, loss) in models_to_tune if mk in tuning_functions]
     for model_key, loss_key in models_that_will_tune:
         try:
@@ -618,16 +623,17 @@ def tune_selected_models(args, default_setup, models_to_tune, tuning_functions,
             tuned_results.append(evaluate_model(y_test, pred, name, y_train))
 
             params_suffix = f"{model_key}_{loss_key}" if loss_key else model_key
-            params_file = os.path.join(dataset_results_dir, f"{params_suffix}_best_params.json")
-            with open(params_file, 'w') as f:
-                json.dump(best_params if best_params is not None else {}, f, indent=4)
-                
-            logger.info(f"Best parameters for {model_key.upper()} saved to {params_file}")
-            
+            all_tuned_params[params_suffix] = best_params if best_params is not None else {}
         except Exception as e:
             logger.error(f"Error tuning {model_key.upper()} model: {e}")
             logger.error(f"Traceback: {traceback.format_exc()}")
-    
+
+    if all_tuned_params:
+        single_params_path = os.path.join(dataset_results_dir, "tuned_best_params.json")
+        with open(single_params_path, "w") as f:
+            json.dump(all_tuned_params, f, indent=2)
+        logger.info(f"Tuned parameters saved to '{single_params_path}'")
+
     return tuned_predictions, tuned_names, tuned_results
 
 def determine_seasonal_periods(y_train):
