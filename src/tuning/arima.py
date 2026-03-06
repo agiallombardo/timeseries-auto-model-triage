@@ -40,4 +40,4 @@ def grid_search_arima(train_data, test_data):
         pd.DataFrame(results).sort_values('aic').to_csv(
             'arima_grid_search_results.csv', index=False
         )
-    return best_order, best_predictions
+    return {"order": list(best_order)}, best_predictions

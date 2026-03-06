@@ -50,4 +50,4 @@ def grid_search_exponential_smoothing(train_data, test_data, seasonal_periods=12
         pd.DataFrame(results).sort_values('aic').to_csv(
             'es_grid_search_results.csv', index=False
         )
-    return best_params, best_predictions
+    return {"trend": best_params[0], "seasonal": best_params[1]}, best_predictions

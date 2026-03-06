@@ -5,8 +5,8 @@ from prophet import Prophet
 
 logger = logging.getLogger(__name__)
 
-def run_prophet(train_data, test_data):
-    """Run Facebook Prophet model."""
+def run_prophet(train_data, test_data, **kwargs):
+    """Run Facebook Prophet model. kwargs are passed to Prophet()."""
     logger.info("Training Prophet model...")
     
     # Prepare data in Prophet format
@@ -16,7 +16,7 @@ def run_prophet(train_data, test_data):
     })
     
     # Initialize and fit Prophet model
-    model = Prophet()
+    model = Prophet(**kwargs)
     model.fit(train_df)
     
     # Create future dataframe for forecasting

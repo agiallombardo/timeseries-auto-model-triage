@@ -53,4 +53,8 @@ def grid_search_sarima(train_data, test_data, seasonal_periods=12):
         pd.DataFrame(results).sort_values('aic').to_csv(
             'sarima_grid_search_results.csv', index=False
         )
-    return (best_order, best_seasonal_order), best_predictions
+    best_params = {
+        "order": list(best_order),
+        "seasonal_order": list(best_seasonal_order),
+    }
+    return best_params, best_predictions

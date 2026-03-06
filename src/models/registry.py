@@ -108,24 +108,34 @@ def _name_with_loss(base_name, loss_key):
 
 # ---- Run wrappers (return (predictions, display_name)) ---------------------
 
-def run_arima_wrapper(y_train, y_test, **kwargs):
-    pred = run_arima(y_train, y_test)
-    return pred, DISPLAY_NAMES['arima']
+def run_arima_wrapper(y_train, y_test, order=(5, 1, 0), **kwargs):
+    order = tuple(order) if isinstance(order, list) else order
+    pred = run_arima(y_train, y_test, order=order)
+    return pred, f"ARIMA{order}"
 
-def run_sarima_wrapper(y_train, y_test, seasonal_periods=12, **kwargs):
-    pred = run_sarima(y_train, y_test, seasonal_order=(1, 1, 1, seasonal_periods))
-    return pred, DISPLAY_NAMES['sarima']
+def run_sarima_wrapper(y_train, y_test, seasonal_periods=12, order=(1, 1, 1), seasonal_order=(1, 1, 1, 12), **kwargs):
+    order = tuple(order) if isinstance(order, list) else order
+    so = tuple(seasonal_order) if isinstance(seasonal_order, list) else seasonal_order
+    if len(so) == 4 and so[3] != seasonal_periods:
+        so = (so[0], so[1], so[2], seasonal_periods)
+    pred = run_sarima(y_train, y_test, order=order, seasonal_order=so)
+    return pred, f"SARIMA{order}x{so}"
 
-def run_ma_wrapper(y_train, y_test, ma_window=3, **kwargs):
-    pred = run_moving_average(y_train, y_test, window=ma_window)
-    return pred, f"{DISPLAY_NAMES['ma']} (w={ma_window})"
+def run_ma_wrapper(y_train, y_test, ma_window=3, window=None, **kwargs):
+    w = window if window is not None else ma_window
+    pred = run_moving_average(y_train, y_test, window=w)
+    return pred, f"{DISPLAY_NAMES['ma']} (w={w})"
 
-def run_es_wrapper(y_train, y_test, seasonal_periods=12, **kwargs):
-    pred = run_exponential_smoothing(y_train, y_test, seasonal_periods=seasonal_periods)
-    return pred, DISPLAY_NAMES['es']
+def run_es_wrapper(y_train, y_test, seasonal_periods=12, trend='add', seasonal='add', **kwargs):
+    pred = run_exponential_smoothing(
+        y_train, y_test,
+        trend=trend, seasonal=seasonal,
+        seasonal_periods=seasonal_periods if seasonal else None,
+    )
+    return pred, f"{DISPLAY_NAMES['es']} (trend={trend}, seasonal={seasonal})"
 
 def run_prophet_wrapper(y_train, y_test, **kwargs):
-    pred = run_prophet(y_train, y_test)
+    pred = run_prophet(y_train, y_test, **kwargs)
     return pred, DISPLAY_NAMES['prophet']
 
 def run_rf_wrapper(y_train, y_test, X_train=None, X_test=None, loss='l2', **kwargs):
@@ -133,7 +143,8 @@ def run_rf_wrapper(y_train, y_test, X_train=None, X_test=None, loss='l2', **kwar
     return pred, _name_with_loss(DISPLAY_NAMES['rf'], loss)
 
 def run_svr_wrapper(y_train, y_test, X_train=None, X_test=None, **kwargs):
-    pred, _ = run_svr(X_train, X_test, y_train)
+    svr_kwargs = {k: v for k, v in kwargs.items() if k in ('C', 'kernel', 'gamma', 'epsilon')}
+    pred, _ = run_svr(X_train, X_test, y_train, **svr_kwargs)
     return pred, DISPLAY_NAMES['svr']
 
 def run_xgb_wrapper(y_train, y_test, X_train=None, X_test=None, loss='l2', **kwargs):
@@ -169,19 +180,23 @@ def run_cnn1d_wrapper(y_train, y_test, X_train=None, X_test=None, n_steps=5, los
     return pred, _name_with_loss(DISPLAY_NAMES['cnn1d'], loss)
 
 
-# ---- Tune wrappers (return (predictions, display_name, best_params)) -------
+# ---- Tune wrappers (return (predictions, display_name, best_params)); best_params are dicts -------
 
 def tune_arima_wrapper(y_train, y_test, **kwargs):
     best_params, pred = grid_search_arima(y_train, y_test)
-    return pred, f"ARIMA{best_params} (Tuned)", best_params
+    order = tuple(best_params["order"]) if isinstance(best_params.get("order"), list) else best_params.get("order")
+    return pred, f"ARIMA{order} (Tuned)", best_params
 
 def tune_sarima_wrapper(y_train, y_test, seasonal_periods=12, **kwargs):
     best_params, pred = grid_search_sarima(y_train, y_test, seasonal_periods)
-    return pred, f"SARIMA{best_params[0]}x{best_params[1]} (Tuned)", best_params
+    o = best_params.get("order", [])
+    s = best_params.get("seasonal_order", [])
+    return pred, f"SARIMA{o}x{s} (Tuned)", best_params
 
 def tune_ma_wrapper(y_train, y_test, **kwargs):
-    best_window, pred = grid_search_moving_average(y_train, y_test)
-    return pred, f"{DISPLAY_NAMES['ma']} (w={best_window}, Tuned)", best_window
+    best_params, pred = grid_search_moving_average(y_train, y_test)
+    w = best_params.get("window", 3)
+    return pred, f"{DISPLAY_NAMES['ma']} (w={w}, Tuned)", best_params
 
 def tune_es_wrapper(y_train, y_test, seasonal_periods=12, **kwargs):
     best_params, pred = grid_search_exponential_smoothing(y_train, y_test, seasonal_periods)

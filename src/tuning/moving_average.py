@@ -38,4 +38,4 @@ def grid_search_moving_average(train_data, test_data):
         pd.DataFrame(results).sort_values('rmse').to_csv(
             'ma_grid_search_results.csv', index=False
         )
-    return best_window, best_predictions
+    return {"window": best_window}, best_predictions
