@@ -11,6 +11,7 @@ DEFAULT_SETUP = {
     "n_steps_univariate": 3,   # RNN, LSTM
     "n_steps_feature": 5,      # LSTM-feat, RNN-feat, CNN-1D
     "ma_window": 3,
+    "n_runs": 3,               # run each (model, variation) this many times; rerank by mean metrics
 }
 
 # Exactly 3 variation specs per model (aligned to what each model supports)

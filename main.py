@@ -53,6 +53,22 @@ def _parse_display_name(display_name):
     return model_key, loss
 
 
+def _aggregate_run_results(run_results, model_name):
+    """Aggregate n_runs evaluation dicts into one with mean metrics for reranking."""
+    if not run_results:
+        return {"model": model_name, "rmse": np.nan, "mae": np.nan, "r2": np.nan, "mse": np.nan, "mase": np.nan, "mape": np.nan}
+    keys = ["mse", "rmse", "mae", "r2", "mase", "mape"]
+    out = {"model": model_name}
+    for k in keys:
+        if k not in run_results[0]:
+            continue
+        vals = [r[k] for r in run_results if k in r]
+        if not vals:
+            continue
+        out[k] = float(np.nanmean(vals))
+    return out
+
+
 def _dataset_results_dir(args):
     """Results path: output_dir / dataset_name / date (YYYY-MM-DD)."""
     dataset_name = os.path.basename(args.file).split(".")[0]
@@ -83,6 +99,7 @@ def _build_run_config(
         "lags": default_setup["lags"],
         "rolling_window": default_setup["rolling_window"],
         "ma_window": default_setup["ma_window"],
+        "n_runs": default_setup.get("n_runs", 3),
         "total_samples": n_train + n_test,
         "training_samples": n_train,
         "testing_samples": n_test,
@@ -316,7 +333,8 @@ def _run_models_impl(args, default_setup, available_models, tuning_functions, X_
                     logger.error(traceback.format_exc())
         return all_predictions, model_names, results, run_configs
 
-    # Default: run exactly 3 variations per model (no tuning)
+    # Default: run exactly 3 variations per model, each variation run n_runs times; rerank by mean metrics
+    n_runs = default_setup.get("n_runs", 3)
     for model_key in models_to_run:
         if model_key not in available_models:
             continue
@@ -328,11 +346,21 @@ def _run_models_impl(args, default_setup, available_models, tuning_functions, X_
                 model_params = _base_params(default_setup, model_key, y_train, y_test, X_train, X_test, seasonal_periods)
                 model_params.update(variation_spec)
                 loss_key = variation_spec.get("loss")
-                logger.info(f"Running {model_key.upper()}" + (f" ({loss_key.upper()})" if loss_key else "") + " ...")
-                pred, name = execute_model(model_key, available_models, model_params)
-                all_predictions.append(pred)
+                logger.info(
+                    f"Running {model_key.upper()}" + (f" ({loss_key.upper()})" if loss_key else "")
+                run_results = []
+                run_preds = []
+                for run_idx in range(n_runs):
+                    logger.info(f"  Run {run_idx + 1}/{n_runs} ...")
+                    pred, name = execute_model(model_key, available_models, model_params)
+                    run_preds.append(np.asarray(pred))
+                    run_results.append(evaluate_model(y_test, pred, name, y_train))
+                # Aggregate: mean metrics and mean predictions; ranking uses mean metrics
+                mean_pred = np.mean(run_preds, axis=0)
+                agg = _aggregate_run_results(run_results, name)
+                all_predictions.append(mean_pred)
                 model_names.append(name)
-                results.append(evaluate_model(y_test, pred, name, y_train))
+                results.append(agg)
                 hp = {**default_hp, **variation_spec}
                 run_configs.append(_build_run_config(
                     args, default_setup, model_key, variation_index, variation_spec,
