@@ -53,6 +53,13 @@ def _parse_display_name(display_name):
     return model_key, loss
 
 
+def _dataset_results_dir(args):
+    """Results path: output_dir / dataset_name / date (YYYY-MM-DD)."""
+    dataset_name = os.path.basename(args.file).split(".")[0]
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    return os.path.join(args.output_dir, dataset_name, date_str)
+
+
 def _get_losses_for_model(model_key, requested_losses):
     """Return the list of loss keys to run for this model. requested_losses is from args.losses (None = all)."""
     if model_key not in LOSS_SUPPORTED_MODELS:
@@ -229,8 +236,7 @@ def main():
     
     # Append run configs for tuned models (if any)
     if models_to_tune:
-        dataset_name = os.path.basename(args.file).split(".")[0]
-        dataset_results_dir = os.path.join(args.output_dir, dataset_name)
+        dataset_results_dir = _dataset_results_dir(args)
         for i, name in enumerate(tuned_names):
             if " (Tuned)" not in name:
                 continue
@@ -363,8 +369,7 @@ def process_results(args, default_setup, all_predictions, model_names, results, 
         logger.error("No models were successfully trained. Check the logs for errors.")
         return
 
-    dataset_name = os.path.basename(args.file).split(".")[0]
-    dataset_results_dir = os.path.join(args.output_dir, dataset_name)
+    dataset_results_dir = _dataset_results_dir(args)
     os.makedirs(dataset_results_dir, exist_ok=True)
 
     # Save per-model configs (parameters, tuning, normalization, shape, time steps)
@@ -427,8 +432,9 @@ def process_results(args, default_setup, all_predictions, model_names, results, 
     top_models_info = {}
     
     # Add dataset information
-    top_models_info['dataset'] = {
-        'name': dataset_name,
+    dataset_name = os.path.basename(args.file).split(".")[0]
+    top_models_info["dataset"] = {
+        "name": dataset_name,
         'file': args.file,
         'time_column': args.time_col,
         'data_column': args.data_col,
@@ -517,8 +523,7 @@ def tune_selected_models(args, default_setup, models_to_tune, tuning_functions,
     tuned_names = []
     tuned_results = []
 
-    dataset_name = os.path.basename(args.file).split(".")[0]
-    dataset_results_dir = os.path.join(args.output_dir, dataset_name)
+    dataset_results_dir = _dataset_results_dir(args)
     os.makedirs(dataset_results_dir, exist_ok=True)
     seasonal_periods = determine_seasonal_periods(y_train)
 
