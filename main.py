@@ -205,7 +205,7 @@ def main():
     available_models = get_available_models()
     tuning_functions = get_tuning_functions()
     
-    all_predictions, model_names, results, run_configs = run_models(
+    all_predictions, model_names, results, run_configs, best_per_run = run_models(
         args, default_setup, available_models, tuning_functions,
         X_train, X_test, y_train, y_test, train_df, test_df
     )
@@ -277,12 +277,12 @@ def main():
                 n_train=len(y_train), n_test=len(y_test),
             ))
     process_results(
-        args, default_setup, all_predictions, model_names, results, run_configs,
+        args, default_setup, all_predictions, model_names, results, run_configs, best_per_run,
         y_train, y_test, X_train, X_test, tuning_functions
     )
 
 def run_models(args, default_setup, available_models, tuning_functions, X_train, X_test, y_train, y_test, train_df, test_df):
-    """Run exactly 3 variations per model (built-in defaults), no tuning. Returns predictions, names, results, run_configs."""
+    """Run exactly 3 variations per model (built-in defaults), no tuning. Returns predictions, names, results, run_configs, best_per_run."""
     logger = logging.getLogger(__name__)
 
     # Suppress noisy warnings during model runs (statsmodels frequency, Keras input_shape)
@@ -331,13 +331,14 @@ def _run_models_impl(args, default_setup, available_models, tuning_functions, X_
                 except Exception as e:
                     logger.error(f"Error tuning {model_key.upper()}: {e}")
                     logger.error(traceback.format_exc())
-        return all_predictions, model_names, results, run_configs
+        return all_predictions, model_names, results, run_configs, []
 
     # Default: loop the entire program n_runs times, then aggregate and rerank by mean metrics
     n_runs = default_setup.get("n_runs", 3)
     all_runs_preds = []
     all_runs_results = []
     first_run_names = []
+    best_per_run = []
 
     for run_idx in range(n_runs):
         logger.info(f"=== Program run {run_idx + 1}/{n_runs} ===")
@@ -373,6 +374,25 @@ def _run_models_impl(args, default_setup, available_models, tuning_functions, X_
         all_runs_preds.append(run_preds)
         all_runs_results.append(run_results)
 
+        # Best (model, variation) this run by composite score
+        if run_results and run_configs:
+            run_df = pd.DataFrame(run_results)
+            _, _, run_df_scored = compute_best_judgment(run_df)
+            best_row = run_df_scored.iloc[0]
+            best_idx = int(run_df_scored.index[0])
+            cfg = run_configs[best_idx] if best_idx < len(run_configs) else {}
+            best_per_run.append({
+                "run": run_idx + 1,
+                "best_model": best_row["model"],
+                "composite_score": float(best_row["composite_score"]),
+                "rmse": float(best_row["rmse"]),
+                "mae": float(best_row["mae"]),
+                "r2": float(best_row["r2"]),
+                "variation_spec": cfg.get("variation_spec", {}),
+                "hyperparameters": cfg.get("hyperparameters", {}),
+            })
+            logger.info(f"Run {run_idx + 1} best: {best_row['model']} (composite={best_row['composite_score']:.3f})")
+
     # Aggregate across program runs: mean metrics and mean predictions per model; rerank by mean metrics
     n_models = len(first_run_names)
     for i in range(n_models):
@@ -385,7 +405,7 @@ def _run_models_impl(args, default_setup, available_models, tuning_functions, X_
         model_names.append(name)
         results.append(_aggregate_run_results(result_dicts, name))
 
-    return all_predictions, model_names, results, run_configs
+    return all_predictions, model_names, results, run_configs, best_per_run
 
 
 def _base_params(default_setup, model_key, y_train, y_test, X_train, X_test, seasonal_periods):
@@ -403,8 +423,8 @@ def _base_params(default_setup, model_key, y_train, y_test, X_train, X_test, sea
         "ma_window": default_setup["ma_window"],
     }
 
-def process_results(args, default_setup, all_predictions, model_names, results, run_configs, y_train, y_test, X_train, X_test, tuning_functions):
-    """Process and display the results of model forecasting. Save model_configs.json."""
+def process_results(args, default_setup, all_predictions, model_names, results, run_configs, best_per_run, y_train, y_test, X_train, X_test, tuning_functions):
+    """Process and display the results of model forecasting. Save model_configs.json and best_per_run.json."""
     logger = logging.getLogger(__name__)
 
     if not all_predictions:
@@ -420,6 +440,13 @@ def process_results(args, default_setup, all_predictions, model_names, results, 
         with open(configs_path, "w") as f:
             json.dump(run_configs, f, indent=2)
         logger.info(f"Model configs saved to '{configs_path}'")
+
+    # Save best (model, variation) per program run (by composite score)
+    if best_per_run:
+        best_path = os.path.join(dataset_results_dir, "best_per_run.json")
+        with open(best_path, "w") as f:
+            json.dump(best_per_run, f, indent=2)
+        logger.info(f"Best per run saved to '{best_path}'")
 
     # Create a results DataFrame and compute holistic best judgment
     results_df = pd.DataFrame(results)
