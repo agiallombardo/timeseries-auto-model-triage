@@ -23,16 +23,16 @@ def setup_logging(output_dir, log_file='time_series_forecast.log'):
         os.makedirs(output_dir)
         
     log_path = os.path.join(output_dir, log_file)
-    
-    # Configure the root logger
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_path),
-            logging.StreamHandler(sys.stdout)
-        ]
-    )
+    fmt = '%(asctime)s - %(message)s'
+    formatter = logging.Formatter(fmt)
+
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    if not root.handlers:
+        root.addHandler(logging.FileHandler(log_path))
+        root.addHandler(logging.StreamHandler(sys.stdout))
+    for h in root.handlers:
+        h.setFormatter(formatter)
 
     # Reduce noise from Prophet and Stan (MCMC chain progress, daily seasonality messages)
     for name in ("prophet", "cmdstanpy"):
