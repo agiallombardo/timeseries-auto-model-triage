@@ -27,7 +27,7 @@ def setup_logging(output_dir, log_file='time_series_forecast.log'):
     # Configure the root logger
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        format='%(asctime)s - %(message)s',
         handlers=[
             logging.FileHandler(log_path),
             logging.StreamHandler(sys.stdout)
