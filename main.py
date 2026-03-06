@@ -613,6 +613,7 @@ def tune_selected_models(args, default_setup, models_to_tune, tuning_functions,
                 "n_steps": step,
                 "seasonal_periods": seasonal_periods,
                 "ma_window": default_setup["ma_window"],
+                "results_dir": dataset_results_dir,
             }
             if loss_key is not None:
                 model_params["loss"] = loss_key

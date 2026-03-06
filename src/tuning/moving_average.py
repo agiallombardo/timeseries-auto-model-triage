@@ -1,4 +1,5 @@
 import logging
+import os
 import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_squared_error
@@ -8,7 +9,7 @@ from ..models.moving_average import run_moving_average
 logger = logging.getLogger(__name__)
 
 
-def grid_search_moving_average(train_data, test_data):
+def grid_search_moving_average(train_data, test_data, results_dir=None, **kwargs):
     """Grid search for Moving Average window. Returns (best_window, best_predictions)."""
     logger.info("Performing grid search for Moving Average window size...")
     window_sizes = range(2, min(30, len(train_data) // 2))
@@ -35,7 +36,6 @@ def grid_search_moving_average(train_data, test_data):
     best_predictions = run_moving_average(train_data, test_data, window=best_window)
 
     if results:
-        pd.DataFrame(results).sort_values('rmse').to_csv(
-            'ma_grid_search_results.csv', index=False
-        )
+        path = os.path.join(results_dir, 'ma_grid_search_results.csv') if results_dir else 'ma_grid_search_results.csv'
+        pd.DataFrame(results).sort_values('rmse').to_csv(path, index=False)
     return {"window": best_window}, best_predictions

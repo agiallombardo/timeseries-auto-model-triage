@@ -1,4 +1,5 @@
 import logging
+import os
 import numpy as np
 import pandas as pd
 from tensorflow.keras.models import Sequential
@@ -15,7 +16,7 @@ from ..losses import get_keras_loss
 logger = logging.getLogger(__name__)
 
 
-def grid_search_lstm_features(X_train, X_test, y_train, y_test, loss='l2'):
+def grid_search_lstm_features(X_train, X_test, y_train, y_test, loss='l2', results_dir=None, **kwargs):
     """Grid search for LSTM-feat. Returns (best_params, best_predictions)."""
     logger.info(f"Performing grid search for LSTM-feat ({loss.upper()}) model...")
     n_steps_list = [3, 5, 7]
@@ -73,7 +74,8 @@ def grid_search_lstm_features(X_train, X_test, y_train, y_test, loss='l2'):
 
     logger.info(f"Best LSTM-feat parameters: {best_params} with RMSE: {best_rmse:.4f}")
     if results:
-        pd.DataFrame(results).sort_values('rmse').to_csv('lstm_feat_grid_search_results.csv', index=False)
+        path = os.path.join(results_dir, 'lstm_feat_grid_search_results.csv') if results_dir else 'lstm_feat_grid_search_results.csv'
+        pd.DataFrame(results).sort_values('rmse').to_csv(path, index=False)
 
     if best_params is not None:
         ns = best_params['n_steps']

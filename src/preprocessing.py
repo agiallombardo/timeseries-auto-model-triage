@@ -30,7 +30,8 @@ def get_scaler(name="standard", feature_range=(0, 1), **kwargs):
     if name == "standard":
         return StandardScaler(**kwargs)
     if name == "minmax":
-        return MinMaxScaler(feature_range=feature_range, **kwargs)
+        fr = tuple(feature_range) if feature_range is not None else (0, 1)
+        return MinMaxScaler(feature_range=fr, **kwargs)
     if name == "robust":
         return RobustScaler(**kwargs)
     raise ValueError(f"Unknown scaler: {name}. Use one of: standard, minmax, robust, none.")

@@ -1,14 +1,15 @@
+import itertools
+import logging
+import os
 import numpy as np
 import pandas as pd
-import logging
-import itertools
 from prophet import Prophet
 from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
 
 logger = logging.getLogger(__name__)
 
-def grid_search_prophet(train_data, test_data):
+def grid_search_prophet(train_data, test_data, results_dir=None, **kwargs):
     """
     Grid search for Prophet hyperparameters.
     
@@ -86,6 +87,6 @@ def grid_search_prophet(train_data, test_data):
     
     results_df = pd.DataFrame(results)
     results_df = results_df.sort_values('rmse')
-    results_df.to_csv('prophet_grid_search_results.csv', index=False)
-    
+    path = os.path.join(results_dir, 'prophet_grid_search_results.csv') if results_dir else 'prophet_grid_search_results.csv'
+    results_df.to_csv(path, index=False)
     return best_params, best_predictions

@@ -1,4 +1,5 @@
 import logging
+import os
 import numpy as np
 import pandas as pd
 from tensorflow.keras.callbacks import EarlyStopping
@@ -12,7 +13,7 @@ from ..losses import get_keras_loss
 logger = logging.getLogger(__name__)
 
 
-def grid_search_rnn(train_data, test_data, loss='l2'):
+def grid_search_rnn(train_data, test_data, loss='l2', results_dir=None, **kwargs):
     """Grid search for RNN. Returns (best_params, best_predictions, scaler)."""
     logger.info(f"Performing grid search for RNN ({loss.upper()}) model...")
     scaler = StandardScaler()
@@ -65,7 +66,8 @@ def grid_search_rnn(train_data, test_data, loss='l2'):
 
     logger.info(f"Best RNN parameters: {best_params} with RMSE: {best_rmse:.4f}")
     if results:
-        pd.DataFrame(results).sort_values('rmse').to_csv('rnn_grid_search_results.csv', index=False)
+        path = os.path.join(results_dir, 'rnn_grid_search_results.csv') if results_dir else 'rnn_grid_search_results.csv'
+        pd.DataFrame(results).sort_values('rmse').to_csv(path, index=False)
 
     if best_model is not None and best_params is not None:
         X_train_full, y_train_full = prepare_sequence_data(train_scaled, best_params['n_steps'])

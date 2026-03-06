@@ -1,5 +1,6 @@
 import itertools
 import logging
+import os
 import pandas as pd
 from statsmodels.tsa.arima.model import ARIMA
 
@@ -8,7 +9,7 @@ from ..models.arima import run_arima
 logger = logging.getLogger(__name__)
 
 
-def grid_search_arima(train_data, test_data):
+def grid_search_arima(train_data, test_data, results_dir=None, **kwargs):
     """Grid search for ARIMA order. Returns (best_order, best_predictions)."""
     logger.info("Performing grid search for ARIMA model...")
     p_values = range(0, 5)
@@ -37,7 +38,6 @@ def grid_search_arima(train_data, test_data):
     best_predictions = run_arima(train_data, test_data, order=best_order)
 
     if results:
-        pd.DataFrame(results).sort_values('aic').to_csv(
-            'arima_grid_search_results.csv', index=False
-        )
+        path = os.path.join(results_dir, 'arima_grid_search_results.csv') if results_dir else 'arima_grid_search_results.csv'
+        pd.DataFrame(results).sort_values('aic').to_csv(path, index=False)
     return {"order": list(best_order)}, best_predictions

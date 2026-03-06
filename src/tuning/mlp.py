@@ -1,4 +1,5 @@
 import logging
+import os
 import numpy as np
 import pandas as pd
 from tensorflow.keras.models import Sequential
@@ -14,7 +15,7 @@ from ..losses import get_keras_loss
 logger = logging.getLogger(__name__)
 
 
-def grid_search_mlp(X_train, X_test, y_train, y_test, loss='l2'):
+def grid_search_mlp(X_train, X_test, y_train, y_test, loss='l2', results_dir=None, **kwargs):
     """Grid search for MLP. Returns (best_params, best_predictions)."""
     logger.info(f"Performing grid search for MLP ({loss.upper()}) model...")
     scaler = StandardScaler()
@@ -59,7 +60,8 @@ def grid_search_mlp(X_train, X_test, y_train, y_test, loss='l2'):
 
     logger.info(f"Best MLP parameters: {best_params} with RMSE: {best_rmse:.4f}")
     if results:
-        pd.DataFrame(results).sort_values('rmse').to_csv('mlp_grid_search_results.csv', index=False)
+        path = os.path.join(results_dir, 'mlp_grid_search_results.csv') if results_dir else 'mlp_grid_search_results.csv'
+        pd.DataFrame(results).sort_values('rmse').to_csv(path, index=False)
 
     if best_params is not None:
         u = best_params['units']

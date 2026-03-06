@@ -1,4 +1,5 @@
 import logging
+import os
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
@@ -9,7 +10,7 @@ from ..losses import get_rf_criterion
 logger = logging.getLogger(__name__)
 
 
-def grid_search_random_forest(X_train, X_test, y_train, y_test, loss='l2'):
+def grid_search_random_forest(X_train, X_test, y_train, y_test, loss='l2', results_dir=None, **kwargs):
     """Grid search for Random Forest. Returns (best_params, best_predictions)."""
     logger.info(f"Performing grid search for Random Forest ({loss.upper()}) model...")
     criterion = get_rf_criterion(loss)
@@ -38,11 +39,16 @@ def grid_search_random_forest(X_train, X_test, y_train, y_test, loss='l2'):
     best_model.fit(X_train, y_train)
     best_predictions = best_model.predict(X_test)
 
+    if results_dir:
+        grid_path = os.path.join(results_dir, 'rf_grid_search_results.csv')
+        fi_path = os.path.join(results_dir, 'rf_feature_importance.csv')
+    else:
+        grid_path, fi_path = 'rf_grid_search_results.csv', 'rf_feature_importance.csv'
     pd.DataFrame(grid_search.cv_results_).assign(
         mean_test_score=lambda df: -df['mean_test_score']
-    ).sort_values('mean_test_score').to_csv('rf_grid_search_results.csv', index=False)
+    ).sort_values('mean_test_score').to_csv(grid_path, index=False)
     pd.DataFrame({
         'feature': X_train.columns,
         'importance': best_model.feature_importances_,
-    }).sort_values('importance', ascending=False).to_csv('rf_feature_importance.csv', index=False)
+    }).sort_values('importance', ascending=False).to_csv(fi_path, index=False)
     return best_params, best_predictions

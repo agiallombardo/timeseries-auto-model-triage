@@ -1,4 +1,5 @@
 import logging
+import os
 import pandas as pd
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 
@@ -7,7 +8,7 @@ from ..models.exponential_smoothing import run_exponential_smoothing
 logger = logging.getLogger(__name__)
 
 
-def grid_search_exponential_smoothing(train_data, test_data, seasonal_periods=12):
+def grid_search_exponential_smoothing(train_data, test_data, seasonal_periods=12, results_dir=None, **kwargs):
     """Grid search for Exponential Smoothing. Returns (best_params, best_predictions)."""
     logger.info("Performing grid search for Exponential Smoothing model...")
     trend_types = ['add', 'mul', None]
@@ -47,7 +48,6 @@ def grid_search_exponential_smoothing(train_data, test_data, seasonal_periods=12
     )
 
     if results:
-        pd.DataFrame(results).sort_values('aic').to_csv(
-            'es_grid_search_results.csv', index=False
-        )
+        path = os.path.join(results_dir, 'es_grid_search_results.csv') if results_dir else 'es_grid_search_results.csv'
+        pd.DataFrame(results).sort_values('aic').to_csv(path, index=False)
     return {"trend": best_params[0], "seasonal": best_params[1]}, best_predictions

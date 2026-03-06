@@ -1,5 +1,6 @@
 import itertools
 import logging
+import os
 import pandas as pd
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 
@@ -8,7 +9,7 @@ from ..models.sarima import run_sarima
 logger = logging.getLogger(__name__)
 
 
-def grid_search_sarima(train_data, test_data, seasonal_periods=12):
+def grid_search_sarima(train_data, test_data, seasonal_periods=12, results_dir=None, **kwargs):
     """Grid search for SARIMA. Returns ((order, seasonal_order), best_predictions)."""
     logger.info("Performing grid search for SARIMA model...")
     p_values, d_values, q_values = range(0, 3), range(0, 2), range(0, 3)
@@ -50,9 +51,8 @@ def grid_search_sarima(train_data, test_data, seasonal_periods=12):
     )
 
     if results:
-        pd.DataFrame(results).sort_values('aic').to_csv(
-            'sarima_grid_search_results.csv', index=False
-        )
+        path = os.path.join(results_dir, 'sarima_grid_search_results.csv') if results_dir else 'sarima_grid_search_results.csv'
+        pd.DataFrame(results).sort_values('aic').to_csv(path, index=False)
     best_params = {
         "order": list(best_order),
         "seasonal_order": list(best_seasonal_order),

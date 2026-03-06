@@ -1,4 +1,5 @@
 import logging
+import os
 import pandas as pd
 from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
 from sklearn.svm import SVR
@@ -7,7 +8,7 @@ from sklearn.preprocessing import StandardScaler
 logger = logging.getLogger(__name__)
 
 
-def grid_search_svr(X_train, X_test, y_train, y_test):
+def grid_search_svr(X_train, X_test, y_train, y_test, results_dir=None, **kwargs):
     """Grid search for SVR. Returns (best_params, best_predictions, scalers)."""
     logger.info("Performing grid search for SVR model...")
     scaler_X = StandardScaler()
@@ -41,7 +42,8 @@ def grid_search_svr(X_train, X_test, y_train, y_test):
     predictions_scaled = best_model.predict(X_test_scaled)
     best_predictions = scaler_y.inverse_transform(predictions_scaled.reshape(-1, 1)).ravel()
 
+    path = os.path.join(results_dir, 'svr_grid_search_results.csv') if results_dir else 'svr_grid_search_results.csv'
     pd.DataFrame(grid_search.cv_results_).assign(
         mean_test_score=lambda df: -df['mean_test_score']
-    ).sort_values('mean_test_score').to_csv('svr_grid_search_results.csv', index=False)
+    ).sort_values('mean_test_score').to_csv(path, index=False)
     return best_params, best_predictions, (scaler_X, scaler_y)
