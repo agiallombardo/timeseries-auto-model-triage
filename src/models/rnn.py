@@ -4,19 +4,19 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Input, SimpleRNN
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping
-from sklearn.preprocessing import StandardScaler
 
 from ._dl_utils import prepare_sequence_data
 from ..losses import get_keras_loss
+from ..preprocessing import get_scaler
 
 logger = logging.getLogger(__name__)
 
 
-def create_rnn_model(input_shape, units=50, learning_rate=0.001, loss='l2'):
+def create_rnn_model(input_shape, units=50, learning_rate=0.001, loss='l2', activation='relu'):
     """Build and compile RNN (used by tuning)."""
     model = Sequential([
         Input(shape=input_shape),
-        SimpleRNN(units, activation='relu'),
+        SimpleRNN(units, activation=activation),
         Dense(1),
     ])
     model.compile(
@@ -26,15 +26,20 @@ def create_rnn_model(input_shape, units=50, learning_rate=0.001, loss='l2'):
     return model
 
 
-def run_rnn(train_data, test_data, n_steps=3, loss='l2'):
+def run_rnn(train_data, test_data, n_steps=3, loss='l2', scaler='standard', feature_range=(0, 1),
+            units=50, activation='relu', **kwargs):
     """Run RNN model for time series forecasting (univariate, recursive rollout)."""
     logger.info(f"Training RNN ({loss.upper()}) model...")
-    scaler = StandardScaler()
-    train_scaled = scaler.fit_transform(train_data.values.reshape(-1, 1))
+    scaler_obj = get_scaler(scaler, feature_range=feature_range)
+    train_arr = train_data.values.reshape(-1, 1)
+    if scaler_obj is not None:
+        train_scaled = scaler_obj.fit_transform(train_arr)
+    else:
+        train_scaled = train_arr.copy()
     X_train, y_train = prepare_sequence_data(train_scaled, n_steps)
     X_train = X_train.reshape(X_train.shape[0], X_train.shape[1], 1)
 
-    model = create_rnn_model(input_shape=(n_steps, 1), loss=loss)
+    model = create_rnn_model(input_shape=(n_steps, 1), loss=loss, units=units, activation=activation)
     early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
     model.fit(
         X_train, y_train,
@@ -54,5 +59,8 @@ def run_rnn(train_data, test_data, n_steps=3, loss='l2'):
         last_sequence = np.roll(last_sequence, -1, axis=1)
         last_sequence[0, -1, 0] = next_scalar
 
-    predictions = scaler.inverse_transform(np.array(predictions).reshape(-1, 1)).ravel()
-    return predictions, scaler
+    if scaler_obj is not None:
+        predictions = scaler_obj.inverse_transform(np.array(predictions).reshape(-1, 1)).ravel()
+    else:
+        predictions = np.array(predictions).ravel()
+    return predictions, scaler_obj

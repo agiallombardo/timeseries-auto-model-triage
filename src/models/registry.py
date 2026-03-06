@@ -156,11 +156,11 @@ def run_lr_wrapper(y_train, y_test, X_train=None, X_test=None, loss='l2', **kwar
     return pred, _name_with_loss(DISPLAY_NAMES['lr'], loss)
 
 def run_rnn_wrapper(y_train, y_test, n_steps=3, loss='l2', **kwargs):
-    pred, _ = run_rnn(y_train, y_test, n_steps=n_steps, loss=loss)
+    pred, _ = run_rnn(y_train, y_test, n_steps=n_steps, loss=loss, **kwargs)
     return pred, _name_with_loss(DISPLAY_NAMES['rnn'], loss)
 
 def run_lstm_wrapper(y_train, y_test, n_steps=3, loss='l2', **kwargs):
-    pred, _ = run_lstm(y_train, y_test, n_steps=n_steps, loss=loss)
+    pred, _ = run_lstm(y_train, y_test, n_steps=n_steps, loss=loss, **kwargs)
     return pred, _name_with_loss(DISPLAY_NAMES['lstm'], loss)
 
 def run_mlp_wrapper(y_train, y_test, X_train=None, X_test=None, loss='l2', **kwargs):

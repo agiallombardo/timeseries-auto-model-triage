@@ -1,6 +1,13 @@
 """
 Default setup, exactly 3 variations per model, and metadata for config saving.
 No CLI: all behavior uses these built-in defaults.
+
+Variation axes (settings tested to find best output):
+- Preprocessing: scaler (standard, minmax, robust, none), feature_range for MinMax.
+- Sequence: n_steps (look-back window), reshape (samples, timesteps, features).
+- Model: loss (l2, l1, huber, quantile where supported), units, layers, dropout_rate,
+  activation (relu, tanh), learning_rate.
+- Training: optimizer, batch_size, epochs (in tuning).
 """
 
 # Default setup used for running and for saved config (no CLI override)
@@ -62,14 +69,14 @@ VARIATIONS_PER_MODEL = {
         {"loss": "huber"},
     ],
     "rnn": [
-        {"loss": "l2"},
-        {"loss": "l1"},
-        {"loss": "huber"},
+        {"loss": "l2", "n_steps": 3, "scaler": "standard"},
+        {"loss": "l2", "n_steps": 5, "scaler": "minmax", "feature_range": [0, 1]},
+        {"loss": "l2", "n_steps": 10, "units": 64, "scaler": "standard"},
     ],
     "lstm": [
-        {"loss": "l2"},
-        {"loss": "l1"},
-        {"loss": "huber"},
+        {"loss": "l2", "n_steps": 3, "scaler": "standard"},
+        {"loss": "l2", "n_steps": 5, "scaler": "minmax", "feature_range": [0, 1]},
+        {"loss": "l2", "n_steps": 10, "units": 64, "dropout_rate": 0.2, "scaler": "standard"},
     ],
     "mlp": [
         {"loss": "l2"},
@@ -77,19 +84,19 @@ VARIATIONS_PER_MODEL = {
         {"loss": "huber"},
     ],
     "lstm_feat": [
-        {"loss": "l2"},
-        {"loss": "l1"},
-        {"loss": "huber"},
+        {"loss": "l2", "n_steps": 3},
+        {"loss": "l2", "n_steps": 5},
+        {"loss": "l2", "n_steps": 7},
     ],
     "rnn_feat": [
-        {"loss": "l2"},
-        {"loss": "l1"},
-        {"loss": "huber"},
+        {"loss": "l2", "n_steps": 3},
+        {"loss": "l2", "n_steps": 5},
+        {"loss": "l2", "n_steps": 7},
     ],
     "cnn1d": [
-        {"loss": "l2"},
-        {"loss": "l1"},
-        {"loss": "huber"},
+        {"loss": "l2", "n_steps": 3},
+        {"loss": "l2", "n_steps": 5},
+        {"loss": "l2", "n_steps": 7},
     ],
 }
 
@@ -187,7 +194,7 @@ MODEL_METADATA = {
             "sequence_builder": "prepare_sequence_data",
             "reshape": "(samples, n_steps, 1)",
         },
-        "default_hyperparameters": {"n_steps": 3, "units": 50, "learning_rate": 0.001},
+        "default_hyperparameters": {"n_steps": 3, "units": 50, "learning_rate": 0.001, "scaler": "standard"},
     },
     "lstm": {
         "scaling": "target",
@@ -200,7 +207,7 @@ MODEL_METADATA = {
             "sequence_builder": "prepare_sequence_data",
             "reshape": "(samples, n_steps, 1)",
         },
-        "default_hyperparameters": {"n_steps": 3, "units": 50, "layers": 1, "dropout_rate": 0.0, "learning_rate": 0.001},
+        "default_hyperparameters": {"n_steps": 3, "units": 50, "layers": 1, "dropout_rate": 0.0, "learning_rate": 0.001, "scaler": "standard"},
     },
     "mlp": {
         "scaling": "X_and_y",
