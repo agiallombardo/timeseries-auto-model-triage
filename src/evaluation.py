@@ -155,8 +155,8 @@ def compute_best_judgment(results_df):
     df = df.drop(columns=score_cols)
 
     # Sort by composite (best first)
-    df = df.sort_values('composite_score', ascending=False).reset_index(drop=True)
-    best_row = df.iloc[0]
+    sort_df = df.sort_values('composite_score', ascending=False).reset_index(drop=True)
+    best_row = sort_df.iloc[0]
 
     # Build judgment text
     name = best_row['model']
@@ -183,7 +183,7 @@ def compute_best_judgment(results_df):
             parts.append(f"MASE = {mase:.2f}: consider simpler baselines if parsimony is important.")
 
     judgment_text = " ".join(parts)
-    return best_row, judgment_text, df
+    return best_row, judgment_text, sort_df
 
 
 def plot_results(y_train, y_test, predictions, model_names, save_path='forecast_comparison.png'):
@@ -251,13 +251,15 @@ def create_trellis_plot(y_train, y_test, predictions, model_names, results_df, s
     max_models : int
         Maximum number of models to show (default 9, in a 3x3 grid)
     """
-    # Sort models by performance (composite score if available, else RMSE)
+    # Top 9 by composite score (fallback: RMSE). Match by model name so order matches predictions/model_names.
     sort_col = 'composite_score' if 'composite_score' in results_df.columns else 'rmse'
     ascending = False if sort_col == 'composite_score' else True
-    sorted_df = results_df.sort_values(sort_col, ascending=ascending)
-    sorted_indices = sorted_df.index.values[:max_models]
-    sorted_predictions = [predictions[i] for i in sorted_indices]
-    sorted_model_names = [model_names[i] for i in sorted_indices]
+    sorted_df = results_df.sort_values(sort_col, ascending=ascending).head(max_models)
+    top_names = sorted_df['model'].tolist()
+    name_to_idx = {name: i for i, name in enumerate(model_names)}
+    run_order_indices = [name_to_idx[n] for n in top_names if n in name_to_idx]
+    sorted_predictions = [predictions[i] for i in run_order_indices]
+    sorted_model_names = [model_names[i] for i in run_order_indices]
     n_models = len(sorted_model_names)
 
     # Fixed 3x3 grid for top 9
@@ -315,75 +317,52 @@ def create_trellis_plot(y_train, y_test, predictions, model_names, results_df, s
 def create_top_models_plot(y_train, y_test, predictions, model_names, save_path='top_models.png'):
     """
     Create a detailed comparison plot for the top performing models.
-    
-    Parameters:
-    -----------
-    y_train : Series
-        Training data
-    y_test : Series
-        Test data
-    predictions : list of arrays
-        List of predicted values from top models
-    model_names : list of strings
-        Names of the top models
-    save_path : str
-        Path to save the plot
+    Focuses the x-axis on the prediction (test) period so it is readable.
     """
-    plt.figure(figsize=(12, 8))
-    
-    # Plot training data
-    plt.plot(y_train.index, y_train, 'k-', alpha=0.2, label='Training Data')
-    
-    # Plot test data
-    plt.plot(y_test.index, y_test, 'k-', linewidth=2, label='Actual Test Data')
-    
-    # Plot predictions for top models with different colors
-    colors = ['#1f77b4', '#ff7f0e', '#2ca02c']  # Blue, orange, green
-    markers = ['o', 's', '^']  # Circle, square, triangle
-    
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    # Use only a trailing portion of training so the test period gets most of the x-axis
+    train_frac = 0.15  # show last 15% of training for context
+    n_train = len(y_train)
+    train_tail_start = max(0, int((1 - train_frac) * n_train))
+    train_index = y_train.index
+    x_min = train_index[train_tail_start]
+    x_max = y_test.index[-1]
+
+    # Plot training (tail only) and full test + predictions
+    ax.plot(y_train.index, y_train, 'k-', alpha=0.2, label='Training Data')
+    ax.plot(y_test.index, y_test, 'k-', linewidth=2, label='Actual Test Data')
+
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c']
+    markers = ['o', 's', '^']
     for i, (pred, name) in enumerate(zip(predictions, model_names)):
-        plt.plot(y_test.index, pred, color=colors[i], marker=markers[i], 
-                 markersize=6, markevery=max(1, len(y_test)//20),
-                 linewidth=1.5, label=f"{name} Predictions")
-    
-    # Add title and labels
-    plt.title('Top 3 Models Comparison', fontsize=16)
-    plt.xlabel('Date', fontsize=12)
-    plt.ylabel('Value', fontsize=12)
-    plt.legend(loc='best', fontsize=10)
-    plt.grid(True, alpha=0.3)
-    
-    # Add zoom inset for detailed view
+        ax.plot(y_test.index, pred, color=colors[i], marker=markers[i],
+                markersize=6, markevery=max(1, len(y_test) // 20),
+                linewidth=1.5, label=f"{name} Predictions")
+
+    ax.set_xlim(x_min, x_max)
+    ax.set_title('Top 3 Models Comparison', fontsize=16)
+    ax.set_xlabel('Date', fontsize=12)
+    ax.set_ylabel('Value', fontsize=12)
+    ax.legend(loc='best', fontsize=10)
+    ax.grid(True, alpha=0.3)
+
+    # Inset: zoom on middle of test period with readable date ticks
     from mpl_toolkits.axes_grid1.inset_locator import zoomed_inset_axes, mark_inset
-    
-    # Create inset axes (zoom in to middle 50% of test data)
-    mid_point = len(y_test) // 2
-    quarter = len(y_test) // 4
-    
-    axins = zoomed_inset_axes(plt.gca(), 2.5, loc='upper right')
-    
-    # Plot test data in inset
-    axins.plot(y_test.index[mid_point-quarter:mid_point+quarter], 
-              y_test[mid_point-quarter:mid_point+quarter], 'k-', linewidth=2)
-    
-    # Plot predictions in inset
+    mid = len(y_test) // 2
+    half = len(y_test) // 4
+    axins = zoomed_inset_axes(ax, 2.5, loc='upper right')
+    axins.plot(y_test.index[mid - half:mid + half], y_test.iloc[mid - half:mid + half], 'k-', linewidth=2)
     for i, (pred, name) in enumerate(zip(predictions, model_names)):
-        axins.plot(y_test.index[mid_point-quarter:mid_point+quarter], 
-                  pred[mid_point-quarter:mid_point+quarter], 
-                  color=colors[i], marker=markers[i], markersize=4,
-                  markevery=5, linewidth=1.5)
-    
-    # Set inset axes limits
-    axins.set_xlim(y_test.index[mid_point-quarter], y_test.index[mid_point+quarter-1])
-    
-    # Connect inset to main plot
-    mark_inset(plt.gca(), axins, loc1=2, loc2=4, fc="none", ec="0.5")
-    
-    # Save the plot (bbox_inches='tight' handles layout; tight_layout is
-    # incompatible with zoomed_inset_axes and would produce a warning).
+        axins.plot(y_test.index[mid - half:mid + half], pred[mid - half:mid + half],
+                   color=colors[i], marker=markers[i], markersize=4, markevery=5, linewidth=1.5)
+    axins.set_xlim(y_test.index[mid - half], y_test.index[mid + half - 1])
+    axins.tick_params(axis='x', rotation=45, labelsize=8)
+    axins.xaxis.set_major_locator(MaxNLocator(nbins=5, integer=False))
+    mark_inset(ax, axins, loc1=2, loc2=4, fc="none", ec="0.5")
+
     plt.savefig(save_path, bbox_inches='tight')
     plt.close()
-    
     logger.info(f"Top models comparison plot saved as '{save_path}'")
 
 def create_performance_chart(results_df, save_path='model_performance.png'):

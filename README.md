@@ -66,9 +66,12 @@ Each dataset's results are saved in a dedicated directory (results/{dataset_name
 - all_models_trellis.png - Grid of plots showing each model's performance
 - top_3_models_comparison.png - Detailed comparison of the best models
 - model_performance.png - Bar charts comparing metrics across models
-- model_comparison_results.csv - Tabular performance metrics
-- top_models_info.json - Details about the top models and dataset
-- tuned_best_params.json - Optimized parameters for all tuned models (single file)
+- model_comparison_results.csv - Tabular performance metrics (one row per model, sorted by composite score)
+- model_configs.csv - One row per model (best variation), same order as results; nested fields as JSON strings
+- dataset_info.csv - Dataset metadata and best judgment (one row)
+- best_per_run.csv - Best model per program run (when using multiple runs)
+- top_models.csv - Top 3 models with metrics and params (variation_spec, hyperparameters as JSON strings)
+- tuned_best_params.csv - Tuned model keys and hyperparameters (when tuning was run)
 
 ## Supported Models
 
