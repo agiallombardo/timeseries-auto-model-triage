@@ -289,8 +289,28 @@ def main():
     # Setup logging
     logger = setup_logging(args.output_dir)
 
-    # TensorFlow: prefer Metal GPU on Apple Silicon and apply threading env vars
-    init_tensorflow_device_and_threading()
+    # TensorFlow device + threading init — only when DL models will actually run
+    _DL_MODELS = {"rnn", "lstm", "mlp", "lstm_feat", "rnn_feat", "cnn1d"}
+    _ML_ONLY_MODELS = {"rf", "svr", "xgb", "lr"}
+    _active_models = set(args.models) if args.models and args.models != ["all"] else _DL_MODELS
+    _requests_dl = bool(_active_models & _DL_MODELS or "all" in (args.models or []))
+    if _requests_dl:
+        tf_ready = init_tensorflow_device_and_threading()
+        if not tf_ready:
+            logger.warning(
+                "TensorFlow/Metal initialization failed. "
+                "Skipping DL models and continuing with non-DL models."
+            )
+            if args.models and "all" in args.models:
+                args.models = sorted(_ML_ONLY_MODELS)
+            else:
+                args.models = [m for m in (args.models or []) if m not in _DL_MODELS]
+            if not args.models:
+                logger.error(
+                    "No runnable models remain after disabling DL models. "
+                    "Install compatible TensorFlow packages or run with non-DL models."
+                )
+                return
 
     # Validate --losses if provided; keep only valid keys and warn once
     if args.losses is not None:
@@ -455,33 +475,37 @@ def _run_models_impl(args, default_setup, available_models, tuning_functions, X_
     # If tune_all: run tuning for each (model, variation) - same 3 variations per model
     if args.tune_all:
         logger.info("Performing hyperparameter tuning for all models (3 variations each)")
+        tuning_tasks = []
         for model_key in models_to_run:
             if model_key not in tuning_functions:
                 continue
-            variations = get_variations_for_model(model_key)
-            for variation_index, variation_spec in enumerate(variations):
-                try:
-                    loss_key = variation_spec.get("loss")
-                    logger.info(f"Tuning {model_key.upper()}" + (f" ({loss_key.upper()})" if loss_key else "") + " ...")
-                    var_lags = variation_spec.get("lags")
-                    var_X_train = _subset_lag_features(X_train, var_lags) if var_lags else X_train
-                    var_X_test = _subset_lag_features(X_test, var_lags) if var_lags else X_test
-                    model_params = _base_params(default_setup, model_key, y_train, y_test, var_X_train, var_X_test, seasonal_periods)
-                    model_params.update(variation_spec)
-                    pred, name, best_params = execute_tuning(model_key, tuning_functions, model_params)
-                    all_predictions.append(pred)
-                    model_names.append(name)
-                    results.append(evaluate_model(y_test, pred, name, y_train))
-                    metadata = get_metadata_for_model(model_key)
-                    hp = best_params if isinstance(best_params, dict) else {}
-                    run_configs.append(_build_run_config(
-                        args, default_setup, model_key, variation_index, variation_spec,
-                        name, tuned=True, hyperparameters=hp, metadata=metadata,
-                        n_train=len(y_train), n_test=len(y_test),
-                    ))
-                except Exception as e:
-                    logger.error(f"Error tuning {model_key.upper()}: {e}")
-                    logger.error(traceback.format_exc())
+            for variation_index, variation_spec in enumerate(get_variations_for_model(model_key)):
+                tuning_tasks.append((model_key, variation_index, variation_spec))
+        for model_key, variation_index, variation_spec in tqdm(
+            tuning_tasks, desc="Tuning all", unit="config"
+        ):
+            try:
+                loss_key = variation_spec.get("loss")
+                logger.info(f"Tuning {model_key.upper()}" + (f" ({loss_key.upper()})" if loss_key else "") + " ...")
+                var_lags = variation_spec.get("lags")
+                var_X_train = _subset_lag_features(X_train, var_lags) if var_lags else X_train
+                var_X_test = _subset_lag_features(X_test, var_lags) if var_lags else X_test
+                model_params = _base_params(default_setup, model_key, y_train, y_test, var_X_train, var_X_test, seasonal_periods)
+                model_params.update(variation_spec)
+                pred, name, best_params = execute_tuning(model_key, tuning_functions, model_params)
+                all_predictions.append(pred)
+                model_names.append(name)
+                results.append(evaluate_model(y_test, pred, name, y_train))
+                metadata = get_metadata_for_model(model_key)
+                hp = best_params if isinstance(best_params, dict) else {}
+                run_configs.append(_build_run_config(
+                    args, default_setup, model_key, variation_index, variation_spec,
+                    name, tuned=True, hyperparameters=hp, metadata=metadata,
+                    n_train=len(y_train), n_test=len(y_test),
+                ))
+            except Exception as e:
+                logger.error(f"Error tuning {model_key.upper()}: {e}")
+                logger.error(traceback.format_exc())
         return all_predictions, model_names, results, run_configs, []
 
     # Default: loop the entire program n_runs times, then aggregate and rerank by mean metrics
@@ -506,9 +530,16 @@ def _run_models_impl(args, default_setup, available_models, tuning_functions, X_
                         X_train, X_test, y_train, y_test, seasonal_periods, run_config_args,
                     ))
         logger.info("Running %d (model × variation) tasks with --jobs=%s", len(tasks), args.jobs)
-        raw_results = Parallel(n_jobs=args.jobs, backend="loky")(
-            delayed(_run_one_model_variation)(t) for t in tasks
-        )
+        raw_results = []
+        with tqdm(total=len(tasks), desc="Running", unit="task") as pbar:
+            for i in range(0, len(tasks), args.jobs):
+                chunk = tasks[i : i + args.jobs]
+                chunk_results = Parallel(n_jobs=len(chunk), backend="loky")(
+                    delayed(_run_one_model_variation)(t) for t in chunk
+                )
+                raw_results.extend(chunk_results)
+                pbar.update(len(chunk))
+                pbar.set_postfix_str(f"{pbar.n}/{len(tasks)}")
         # Sort by (run_idx, order of model_key in models_to_run, variation_index)
         model_order = {mk: i for i, mk in enumerate(models_to_run)}
         raw_results.sort(key=lambda r: (r[0], model_order.get(r[1], 0), r[2]))
@@ -544,70 +575,75 @@ def _run_models_impl(args, default_setup, available_models, tuning_functions, X_
                 })
                 logger.info(f"Run {run_idx + 1} best: {best_row['model']} (composite={best_row['composite_score']:.4f})")
     else:
-        # Sequential
-        for run_idx in tqdm(range(n_runs), desc="Runs", unit="run"):
-            logger.info(f"=== Program run {run_idx + 1}/{n_runs} ===")
-            run_preds = []
-            run_results = []
-            model_bar = tqdm(models_to_run, desc=f"Run {run_idx + 1}/{n_runs}", unit="model", leave=False)
-            for model_key in model_bar:
-                if model_key not in available_models:
-                    continue
-                model_bar.set_postfix(model=model_key)
-                t0_model = time.time()
-                variations = get_variations_for_model(model_key)
-                metadata = get_metadata_for_model(model_key)
-                default_hp = dict(metadata.get("default_hyperparameters", {})) if metadata else {}
-                for variation_index, variation_spec in enumerate(variations):
-                    try:
-                        var_lags = variation_spec.get("lags")
-                        var_X_train = _subset_lag_features(X_train, var_lags) if var_lags else X_train
-                        var_X_test = _subset_lag_features(X_test, var_lags) if var_lags else X_test
-                        model_params = _base_params(default_setup, model_key, y_train, y_test, var_X_train, var_X_test, seasonal_periods)
-                        model_params.update(variation_spec)
-                        loss_key = variation_spec.get("loss")
-                        logger.info(
-                            f"Running {model_key.upper()}" + (f" ({loss_key.upper()})" if loss_key else "") + " ..."
-                        )
-                        t0 = time.time()
-                        pred, name = execute_model(model_key, available_models, model_params)
-                        metrics = evaluate_model(y_test, pred, name, y_train)
-                        elapsed = time.time() - t0
-                        run_preds.append(np.asarray(pred))
-                        run_results.append(metrics)
-                        logger.info(f"  var {variation_index + 1}/3 → RMSE={metrics['rmse']:.4f}  ({elapsed:.1f}s)")
-                        if run_idx == 0:
-                            first_run_names.append(name)
-                            run_configs.append(_build_run_config(
-                                args, default_setup, model_key, variation_index, variation_spec,
-                                name, tuned=False, hyperparameters={**default_hp, **variation_spec}, metadata=metadata,
-                                n_train=len(y_train), n_test=len(y_test),
-                            ))
-                    except Exception as e:
-                        logger.error(f"Error with {model_key.upper()} (variation {variation_index}): {e}")
-                        logger.error(traceback.format_exc())
-                logger.info(f"{model_key.upper()} completed in {time.time() - t0_model:.1f}s")
-            all_runs_preds.append(run_preds)
-            all_runs_results.append(run_results)
+        # Sequential: one progress bar over all (run × model × variation) steps
+        n_configs_per_run = sum(
+            len(get_variations_for_model(m)) for m in models_to_run if m in available_models
+        )
+        total_steps = n_runs * n_configs_per_run
+        with tqdm(total=total_steps, desc="Models", unit="config") as pbar:
+            for run_idx in range(n_runs):
+                logger.info(f"=== Program run {run_idx + 1}/{n_runs} ===")
+                run_preds = []
+                run_results = []
+                for model_key in models_to_run:
+                    if model_key not in available_models:
+                        continue
+                    t0_model = time.time()
+                    variations = get_variations_for_model(model_key)
+                    metadata = get_metadata_for_model(model_key)
+                    default_hp = dict(metadata.get("default_hyperparameters", {})) if metadata else {}
+                    for variation_index, variation_spec in enumerate(variations):
+                        pbar.set_postfix_str(f"run {run_idx + 1}/{n_runs} {model_key}")
+                        try:
+                            var_lags = variation_spec.get("lags")
+                            var_X_train = _subset_lag_features(X_train, var_lags) if var_lags else X_train
+                            var_X_test = _subset_lag_features(X_test, var_lags) if var_lags else X_test
+                            model_params = _base_params(default_setup, model_key, y_train, y_test, var_X_train, var_X_test, seasonal_periods)
+                            model_params.update(variation_spec)
+                            loss_key = variation_spec.get("loss")
+                            logger.info(
+                                f"Running {model_key.upper()}" + (f" ({loss_key.upper()})" if loss_key else "") + " ..."
+                            )
+                            t0 = time.time()
+                            pred, name = execute_model(model_key, available_models, model_params)
+                            metrics = evaluate_model(y_test, pred, name, y_train)
+                            elapsed = time.time() - t0
+                            run_preds.append(np.asarray(pred))
+                            run_results.append(metrics)
+                            logger.info(f"  var {variation_index + 1}/3 → RMSE={metrics['rmse']:.4f}  ({elapsed:.1f}s)")
+                            if run_idx == 0:
+                                first_run_names.append(name)
+                                run_configs.append(_build_run_config(
+                                    args, default_setup, model_key, variation_index, variation_spec,
+                                    name, tuned=False, hyperparameters={**default_hp, **variation_spec}, metadata=metadata,
+                                    n_train=len(y_train), n_test=len(y_test),
+                                ))
+                        except Exception as e:
+                            logger.error(f"Error with {model_key.upper()} (variation {variation_index}): {e}")
+                            logger.error(traceback.format_exc())
+                        pbar.update(1)
+                    logger.info(f"{model_key.upper()} completed in {time.time() - t0_model:.1f}s")
+                all_runs_preds.append(run_preds)
+                all_runs_results.append(run_results)
 
-        # Best (model, variation) this run by composite score
-        if run_results and run_configs:
-            run_df = pd.DataFrame(run_results)
-            _, _, run_df_scored = compute_best_judgment(run_df)
-            best_row = run_df_scored.iloc[0]
-            best_idx = int(run_df_scored.index[0])
-            cfg = run_configs[best_idx] if best_idx < len(run_configs) else {}
-            best_per_run.append({
-                "run": run_idx + 1,
-                "best_model": best_row["model"],
-                "composite_score": round(float(best_row["composite_score"]), 4),
-                "rmse": float(best_row["rmse"]),
-                "mae": float(best_row["mae"]),
-                "r2": float(best_row["r2"]),
-                "variation_spec": cfg.get("variation_spec", {}),
-                "hyperparameters": cfg.get("hyperparameters", {}),
-            })
-            logger.info(f"Run {run_idx + 1} best: {best_row['model']} (composite={best_row['composite_score']:.4f})")
+                # Best (model, variation) this run by composite score
+                if run_results and run_configs:
+                    run_df = pd.DataFrame(run_results)
+                    _, _, run_df_scored = compute_best_judgment(run_df)
+                    best_row = run_df_scored.iloc[0]
+                    best_idx = int(run_df_scored.index[0])
+                    cfg = run_configs[best_idx] if best_idx < len(run_configs) else {}
+                    best_per_run.append({
+                        "run": run_idx + 1,
+                        "best_model": best_row["model"],
+                        "composite_score": round(float(best_row["composite_score"]), 4),
+                        "rmse": float(best_row["rmse"]),
+                        "mae": float(best_row["mae"]),
+                        "r2": float(best_row["r2"]),
+                        "variation_spec": cfg.get("variation_spec", {}),
+                        "hyperparameters": cfg.get("hyperparameters", {}),
+                    })
+                    logger.info(f"Run {run_idx + 1} best: {best_row['model']} (composite={best_row['composite_score']:.4f})")
 
     # Per-run composite scores for composite_std (same row order as all_runs_results[r])
     run_scored_dfs = []

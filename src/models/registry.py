@@ -1,11 +1,17 @@
 """
 Registry: maps model keys to runner and tuning functions.
 Each model lives in its own file; this module only routes and passes loss.
+
+DL model imports (rnn, lstm, mlp, lstm_feat, rnn_feat, cnn1d) are deferred
+to the individual wrapper functions so TensorFlow is only loaded when a DL
+model is actually executed. This lets ML-only runs work even when
+tensorflow-metal is missing or incompatible.
 """
 
 import logging
 from ..losses import LOSS_DISPLAY
 
+# Non-DL models: safe to import at load time (no TF dependency)
 from .arima import run_arima
 from .sarima import run_sarima
 from .moving_average import run_moving_average
@@ -15,12 +21,6 @@ from .random_forest import run_random_forest
 from .svr import run_svr
 from .xgboost import run_xgboost
 from .linear_regression import run_linear_regression
-from .rnn import run_rnn
-from .lstm import run_lstm
-from .mlp import run_mlp
-from .lstm_feat import run_lstm_features
-from .rnn_feat import run_rnn_features
-from .cnn1d import run_cnn1d
 
 from ..tuning.arima import grid_search_arima
 from ..tuning.sarima import grid_search_sarima
@@ -31,12 +31,8 @@ from ..tuning.random_forest import grid_search_random_forest
 from ..tuning.svr import grid_search_svr
 from ..tuning.xgboost import grid_search_xgboost
 from ..tuning.linear_regression import grid_search_linear_regression
-from ..tuning.rnn import grid_search_rnn
-from ..tuning.lstm import grid_search_lstm
-from ..tuning.mlp import grid_search_mlp
-from ..tuning.lstm_feat import grid_search_lstm_features
-from ..tuning.rnn_feat import grid_search_rnn_features
-from ..tuning.cnn1d import grid_search_cnn1d
+
+# DL models (TensorFlow): imported lazily inside each wrapper below
 
 logger = logging.getLogger(__name__)
 
@@ -164,16 +160,19 @@ def run_lr_wrapper(y_train, y_test, X_train=None, X_test=None, loss='l2', alpha=
     return pred, name
 
 def run_rnn_wrapper(y_train, y_test, n_steps=3, loss='l2', **kwargs):
+    from .rnn import run_rnn
     pred, _ = run_rnn(y_train, y_test, n_steps=n_steps, loss=loss, **kwargs)
     return pred, _name_with_loss(DISPLAY_NAMES['rnn'], loss)
 
 def run_lstm_wrapper(y_train, y_test, n_steps=3, loss='l2', **kwargs):
+    from .lstm import run_lstm
     pred, _ = run_lstm(y_train, y_test, n_steps=n_steps, loss=loss, **kwargs)
     return pred, _name_with_loss(DISPLAY_NAMES['lstm'], loss)
 
 def run_mlp_wrapper(y_train, y_test, X_train=None, X_test=None, loss='l2',
                     scaler='standard', feature_range=(0, 1),
                     activation='relu', learning_rate=0.001, **kwargs):
+    from .mlp import run_mlp
     pred = run_mlp(X_train, X_test, y_train, loss=loss, scaler=scaler,
                    feature_range=feature_range, activation=activation, learning_rate=learning_rate)
     return pred, _name_with_loss(DISPLAY_NAMES['mlp'], loss)
@@ -181,6 +180,7 @@ def run_mlp_wrapper(y_train, y_test, X_train=None, X_test=None, loss='l2',
 def run_lstm_feat_wrapper(y_train, y_test, X_train=None, X_test=None, n_steps=5, loss='l2',
                           scaler='standard', feature_range=(0, 1),
                           activation='relu', learning_rate=0.001, **kwargs):
+    from .lstm_feat import run_lstm_features
     pred = run_lstm_features(X_train, X_test, y_train, y_test, n_steps=n_steps, loss=loss,
                              scaler=scaler, feature_range=feature_range,
                              activation=activation, learning_rate=learning_rate)
@@ -189,6 +189,7 @@ def run_lstm_feat_wrapper(y_train, y_test, X_train=None, X_test=None, n_steps=5,
 def run_rnn_feat_wrapper(y_train, y_test, X_train=None, X_test=None, n_steps=5, loss='l2',
                          scaler='standard', feature_range=(0, 1),
                          activation='relu', learning_rate=0.001, **kwargs):
+    from .rnn_feat import run_rnn_features
     pred = run_rnn_features(X_train, X_test, y_train, y_test, n_steps=n_steps, loss=loss,
                             scaler=scaler, feature_range=feature_range,
                             activation=activation, learning_rate=learning_rate)
@@ -197,6 +198,7 @@ def run_rnn_feat_wrapper(y_train, y_test, X_train=None, X_test=None, n_steps=5, 
 def run_cnn1d_wrapper(y_train, y_test, X_train=None, X_test=None, n_steps=5, loss='l2',
                       scaler='standard', feature_range=(0, 1),
                       learning_rate=0.001, **kwargs):
+    from .cnn1d import run_cnn1d
     pred = run_cnn1d(X_train, X_test, y_train, y_test, n_steps=n_steps, loss=loss,
                      scaler=scaler, feature_range=feature_range, learning_rate=learning_rate)
     return pred, _name_with_loss(DISPLAY_NAMES['cnn1d'], loss)
@@ -245,33 +247,39 @@ def tune_lr_wrapper(y_train, y_test, X_train=None, X_test=None, loss='l2', **kwa
     return pred, _name_with_loss(DISPLAY_NAMES['lr'], loss) + " (Tuned)", best_params
 
 def tune_rnn_wrapper(y_train, y_test, n_steps=3, loss='l2', **kwargs):
+    from ..tuning.rnn import grid_search_rnn
     best_params, pred, _ = grid_search_rnn(y_train, y_test, loss=loss)
     return pred, _name_with_loss(DISPLAY_NAMES['rnn'], loss) + " (Tuned)", best_params
 
 def tune_lstm_wrapper(y_train, y_test, n_steps=3, loss='l2', **kwargs):
+    from ..tuning.lstm import grid_search_lstm
     best_params, pred, _ = grid_search_lstm(y_train, y_test, loss=loss)
     return pred, _name_with_loss(DISPLAY_NAMES['lstm'], loss) + " (Tuned)", best_params
 
 def tune_mlp_wrapper(y_train, y_test, X_train=None, X_test=None, loss='l2',
                      scaler='standard', feature_range=(0, 1), **kwargs):
+    from ..tuning.mlp import grid_search_mlp
     best_params, pred = grid_search_mlp(X_train, X_test, y_train, y_test, loss=loss,
                                         scaler=scaler, feature_range=feature_range)
     return pred, _name_with_loss(DISPLAY_NAMES['mlp'], loss) + " (Tuned)", best_params
 
 def tune_lstm_feat_wrapper(y_train, y_test, X_train=None, X_test=None, n_steps=5, loss='l2',
                            scaler='standard', feature_range=(0, 1), **kwargs):
+    from ..tuning.lstm_feat import grid_search_lstm_features
     best_params, pred = grid_search_lstm_features(X_train, X_test, y_train, y_test, loss=loss,
                                                   scaler=scaler, feature_range=feature_range)
     return pred, _name_with_loss(DISPLAY_NAMES['lstm_feat'], loss) + " (Tuned)", best_params
 
 def tune_rnn_feat_wrapper(y_train, y_test, X_train=None, X_test=None, n_steps=5, loss='l2',
                           scaler='standard', feature_range=(0, 1), **kwargs):
+    from ..tuning.rnn_feat import grid_search_rnn_features
     best_params, pred = grid_search_rnn_features(X_train, X_test, y_train, y_test, loss=loss,
                                                  scaler=scaler, feature_range=feature_range)
     return pred, _name_with_loss(DISPLAY_NAMES['rnn_feat'], loss) + " (Tuned)", best_params
 
 def tune_cnn1d_wrapper(y_train, y_test, X_train=None, X_test=None, n_steps=5, loss='l2',
                        scaler='standard', feature_range=(0, 1), **kwargs):
+    from ..tuning.cnn1d import grid_search_cnn1d
     best_params, pred = grid_search_cnn1d(X_train, X_test, y_train, y_test, loss=loss,
                                           scaler=scaler, feature_range=feature_range)
     return pred, _name_with_loss(DISPLAY_NAMES['cnn1d'], loss) + " (Tuned)", best_params

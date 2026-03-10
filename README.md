@@ -127,14 +127,14 @@ Use the `--models` flag with the keys below (e.g. `--models rf xgb lstm`). **Def
 
 **Intel Macs:** TensorFlow on macOS does not use the Intel iGPU for training. Use CPU or consider a cloud GPU for heavy DL workloads.
 
-**Troubleshooting: "Library not loaded: … _pywrap_tensorflow_internal.so" (Metal plugin)**  
-This usually means `tensorflow-metal` is incompatible with your TensorFlow version. To run without GPU and avoid the crash:
+**Troubleshooting: "Library not loaded: … _pywrap_tensorflow_internal.so" (Metal plugin)**
+This usually means `tensorflow-metal` is incompatible with your TensorFlow/Python version. To get **DL models running** (on CPU):
 
 ```bash
 pip uninstall tensorflow-metal
 ```
 
-Then reinstall a [tensorflow-metal version](https://pypi.org/project/tensorflow-metal/) that matches your TensorFlow version, or keep it uninstalled to use CPU-only for DL models. You can still run **ML-only** models without TensorFlow by using e.g. `--models rf svr xgb lr`.
+TensorFlow will then use CPU for RNN/LSTM/MLP/etc.; all DL models still run. To try GPU again later, install a [tensorflow-metal version](https://pypi.org/project/tensorflow-metal/) that matches your TensorFlow version.
 
 **TensorFlow threading (CPU or GPU):** You can tune how many threads TensorFlow uses for intra-op and inter-op parallelism via environment variables (e.g. before running `main.py`):
 

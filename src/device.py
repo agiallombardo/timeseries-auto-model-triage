@@ -11,11 +11,19 @@ logger = logging.getLogger(__name__)
 
 
 def init_tensorflow_device_and_threading():
-    """Configure TensorFlow device (prefer Metal on Apple Silicon) and thread counts from env."""
+    """Configure TensorFlow and return True when TF is usable."""
     try:
         import tensorflow as tf
     except ImportError:
-        return
+        logger.info("TensorFlow is not installed; skipping DL device/threading setup.")
+        return False
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.warning(
+            "TensorFlow could not be initialized (%s). "
+            "DL models will be skipped for this run.",
+            exc,
+        )
+        return False
 
     # Threading: respect standard TF env vars (or set from .env)
     intra = os.environ.get("TF_NUM_INTRAOP_THREADS")
@@ -44,3 +52,4 @@ def init_tensorflow_device_and_threading():
             logger.info("TensorFlow using device: %s", gpu_devices[0].name)
     except Exception as e:  # pylint: disable=broad-except
         logger.debug("Could not set TensorFlow visible devices: %s", e)
+    return True
