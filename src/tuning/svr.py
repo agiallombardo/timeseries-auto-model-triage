@@ -2,7 +2,7 @@ import logging
 import os
 import pandas as pd
 from tqdm import tqdm
-from sklearn.model_selection import GridSearchCV, ParameterGrid, TimeSeriesSplit
+from sklearn.model_selection import ParameterGrid, TimeSeriesSplit, cross_val_score
 from sklearn.svm import SVR
 from sklearn.preprocessing import StandardScaler
 
@@ -28,21 +28,26 @@ def grid_search_svr(X_train, X_test, y_train, y_test, results_dir=None, **kwargs
     }
     n_splits = TUNING_SETUP.get("n_splits", 3)
     tscv = TimeSeriesSplit(n_splits=n_splits)
-    grid_search = GridSearchCV(
-        estimator=SVR(),
-        param_grid=param_grid,
-        cv=tscv,
-        scoring='neg_root_mean_squared_error',
-        n_jobs=-1,
-        verbose=0,
-    )
-    n_candidates = len(list(ParameterGrid(param_grid)))
-    with tqdm(total=n_candidates, desc="SVR grid", unit="candidate", leave=False) as pbar:
-        grid_search.fit(X_train_scaled, y_train_scaled)
-        pbar.update(n_candidates)
-    best_params = grid_search.best_params_
-    best_score = -grid_search.best_score_
-    logger.info(f"Best SVR parameters: {best_params} with RMSE: {best_score:.4f}")
+    candidates = list(ParameterGrid(param_grid))
+    cv_results = []
+    best_score = float("-inf")
+    best_params = None
+
+    for params in tqdm(candidates, desc="SVR grid", unit="candidate", leave=False):
+        model = SVR(**params)
+        scores = cross_val_score(
+            model, X_train_scaled, y_train_scaled, cv=tscv,
+            scoring="neg_root_mean_squared_error", n_jobs=1,
+        )
+        mean_score = scores.mean()
+        cv_results.append({**params, "mean_test_score": -mean_score})
+        if mean_score > best_score:
+            best_score = mean_score
+            best_params = params
+        del model
+
+    best_rmse = -best_score
+    logger.info(f"Best SVR parameters: {best_params} with RMSE: {best_rmse:.4f}")
 
     best_model = SVR(**best_params)
     best_model.fit(X_train_scaled, y_train_scaled)
@@ -50,7 +55,5 @@ def grid_search_svr(X_train, X_test, y_train, y_test, results_dir=None, **kwargs
     best_predictions = scaler_y.inverse_transform(predictions_scaled.reshape(-1, 1)).ravel()
 
     path = os.path.join(results_dir, 'svr_grid_search_results.csv') if results_dir else 'svr_grid_search_results.csv'
-    pd.DataFrame(grid_search.cv_results_).assign(
-        mean_test_score=lambda df: -df['mean_test_score']
-    ).sort_values('mean_test_score').to_csv(path, index=False)
+    pd.DataFrame(cv_results).sort_values('mean_test_score').to_csv(path, index=False)
     return best_params, best_predictions, (scaler_X, scaler_y)

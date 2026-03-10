@@ -372,6 +372,14 @@ def main():
     models_to_run_list = list(available_models.keys()) if "all" in args.models else [m.lower() for m in args.models]
     models_to_run_list = [m for m in models_to_run_list if m in available_models]
     n_models = len(models_to_run_list)
+    _DL_KEYS = {"rnn", "lstm", "mlp", "lstm_feat", "rnn_feat", "cnn1d"}
+    _dl_in_run = [m for m in models_to_run_list if m in _DL_KEYS]
+    if _dl_in_run:
+        logger.info("Models to run: %s (DL: %s)", models_to_run_list, _dl_in_run)
+        print(f"Running {n_models} models (including DL: {', '.join(_dl_in_run)})", flush=True)
+    else:
+        logger.info("Models to run (ML/statistical only): %s", models_to_run_list)
+        print(f"Running {n_models} models (ML/statistical only; no DL)", flush=True)
     n_runs = default_setup.get("n_runs", 3)
     if args.tune_all:
         _print_phase(2, 4, f"Tuning all models (3 variations each)…")
