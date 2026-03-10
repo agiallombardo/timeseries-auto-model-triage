@@ -3,6 +3,7 @@ import logging
 import os
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 
 from ..models.sarima import run_sarima
@@ -35,38 +36,39 @@ def grid_search_sarima(train_data, test_data, seasonal_periods=12, results_dir=N
     P_values, D_values, Q_values = range(0, 2), range(0, 2), range(0, 2)
     pdq = list(itertools.product(p_values, d_values, q_values))
     seasonal_pdq = list(itertools.product(P_values, D_values, Q_values, [seasonal_periods]))
+    combos = []
+    for param in pdq:
+        for seasonal_param in seasonal_pdq:
+            combos.append((param, seasonal_param))
+            if len(combos) >= 20:
+                break
+        if len(combos) >= 20:
+            break
+    combos = combos[:20]
 
     best_rmse = float("inf")
     best_order, best_seasonal_order = None, None
     results = []
-    max_combinations = 20
-    combinations_tested = 0
 
-    for param in pdq:
-        for seasonal_param in seasonal_pdq:
-            if combinations_tested >= max_combinations:
-                break
-            try:
-                model = SARIMAX(train_part, order=param, seasonal_order=seasonal_param)
-                model_fit = model.fit(disp=False)
-                forecast = model_fit.forecast(steps=n_val)
-                rmse = score_validation_rmse(val_part, forecast)
-                results.append({
-                    "order": param,
-                    "seasonal_order": seasonal_param,
-                    "validation_rmse": rmse,
-                    "params": {"order": list(param), "seasonal_order": list(seasonal_param)},
-                })
-                if rmse < best_rmse:
-                    best_rmse = rmse
-                    best_order = param
-                    best_seasonal_order = seasonal_param
-                logger.debug(f"SARIMA{param}x{seasonal_param} - validation RMSE: {rmse:.4f}")
-                combinations_tested += 1
-            except Exception:
-                continue
-        if combinations_tested >= max_combinations:
-            break
+    for (param, seasonal_param) in tqdm(combos, desc="SARIMA grid", unit="candidate", leave=False):
+        try:
+            model = SARIMAX(train_part, order=param, seasonal_order=seasonal_param)
+            model_fit = model.fit(disp=False)
+            forecast = model_fit.forecast(steps=n_val)
+            rmse = score_validation_rmse(val_part, forecast)
+            results.append({
+                "order": param,
+                "seasonal_order": seasonal_param,
+                "validation_rmse": rmse,
+                "params": {"order": list(param), "seasonal_order": list(seasonal_param)},
+            })
+            if rmse < best_rmse:
+                best_rmse = rmse
+                best_order = param
+                best_seasonal_order = seasonal_param
+            logger.debug(f"SARIMA{param}x{seasonal_param} - validation RMSE: {rmse:.4f}")
+        except Exception:
+            continue
 
     logger.info(f"Best SARIMA order: {best_order}x{best_seasonal_order} with validation RMSE: {best_rmse:.4f}")
     best_predictions = run_sarima(

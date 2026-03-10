@@ -2,6 +2,7 @@ import logging
 import os
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 from ..model_config import TUNING_SETUP
 from ..models.moving_average import run_moving_average
@@ -25,7 +26,7 @@ def grid_search_moving_average(train_data, test_data, results_dir=None, **kwargs
     best_window = None
     results = []
 
-    for window in window_sizes:
+    for window in tqdm(window_sizes, desc="MA grid", unit="candidate", leave=False):
         ma = pd.Series(train_val).rolling(window=window).mean()
         last_ma = ma.iloc[-1]
         val_pred = np.full(len(val), last_ma)

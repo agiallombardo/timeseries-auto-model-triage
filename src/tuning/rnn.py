@@ -1,7 +1,10 @@
 import logging
 import os
+from itertools import product
+
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 from tensorflow.keras.callbacks import EarlyStopping
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error
@@ -35,37 +38,37 @@ def grid_search_rnn(train_data, test_data, loss='l2', results_dir=None, **kwargs
     best_model = None
     results = []
     early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+    combos = list(product(n_steps_list, units_list, learning_rates, batch_sizes))
 
-    for n_steps in n_steps_list:
+    for (n_steps, units, lr, batch_size) in tqdm(
+        combos, desc=f"RNN ({loss}) grid", unit="candidate", leave=False
+    ):
         X_train, y_train = prepare_sequence_data(train_set, n_steps)
         X_train = X_train.reshape(X_train.shape[0], X_train.shape[1], 1)
         X_val, y_val = prepare_sequence_data(val_set, n_steps)
         X_val = X_val.reshape(X_val.shape[0], X_val.shape[1], 1)
         if len(X_train) < 16 or len(X_val) == 0:
             continue
-        for units in units_list:
-            for lr in learning_rates:
-                for batch_size in batch_sizes:
-                    try:
-                        model = create_rnn_model((n_steps, 1), units=units, learning_rate=lr, loss=loss)
-                        model.fit(
-                            X_train, y_train,
-                            epochs=50,
-                            batch_size=batch_size,
-                            validation_data=(X_val, y_val),
-                            callbacks=[early_stopping],
-                            verbose=0,
-                        )
-                        val_pred = model.predict(X_val, verbose=0).ravel()
-                        rmse = score_validation_rmse(y_val, val_pred)
-                        results.append({'n_steps': n_steps, 'units': units, 'learning_rate': lr, 'batch_size': batch_size, 'rmse': rmse})
-                        if rmse < best_rmse:
-                            best_rmse = rmse
-                            best_params = {'n_steps': n_steps, 'units': units, 'learning_rate': lr, 'batch_size': batch_size}
-                            best_model = model
-                    except Exception as e:
-                        logger.warning(f"Error training RNN: {e}")
-                        continue
+        try:
+            model = create_rnn_model((n_steps, 1), units=units, learning_rate=lr, loss=loss)
+            model.fit(
+                X_train, y_train,
+                epochs=50,
+                batch_size=batch_size,
+                validation_data=(X_val, y_val),
+                callbacks=[early_stopping],
+                verbose=0,
+            )
+            val_pred = model.predict(X_val, verbose=0).ravel()
+            rmse = score_validation_rmse(y_val, val_pred)
+            results.append({'n_steps': n_steps, 'units': units, 'learning_rate': lr, 'batch_size': batch_size, 'rmse': rmse})
+            if rmse < best_rmse:
+                best_rmse = rmse
+                best_params = {'n_steps': n_steps, 'units': units, 'learning_rate': lr, 'batch_size': batch_size}
+                best_model = model
+        except Exception as e:
+            logger.warning(f"Error training RNN: {e}")
+            continue
 
     logger.info(f"Best RNN parameters: {best_params} with RMSE: {best_rmse:.4f}")
     if results:
@@ -79,10 +82,11 @@ def grid_search_rnn(train_data, test_data, loss='l2', results_dir=None, **kwargs
         predictions = []
         last_sequence = train_scaled[-best_params['n_steps']:].reshape(1, best_params['n_steps'], 1)
         for _ in range(len(test_data)):
-            next_value = best_model.predict(last_sequence, verbose=0)
-            predictions.append(next_value[0, 0])
+            next_out = best_model.predict(last_sequence, verbose=0)
+            next_val = float(np.asarray(next_out).ravel()[0])
+            predictions.append(next_val)
             last_sequence = np.roll(last_sequence, -1, axis=1)
-            last_sequence[0, -1, 0] = next_value
+            last_sequence[0, -1, 0] = next_val
         best_predictions = scaler.inverse_transform(np.array(predictions).reshape(-1, 1)).ravel()
     else:
         best_predictions, _ = run_rnn(train_data, test_data, loss=loss)

@@ -3,6 +3,7 @@ import logging
 import os
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 from statsmodels.tsa.arima.model import ARIMA
 
 from ..models.arima import run_arima
@@ -40,7 +41,7 @@ def grid_search_arima(train_data, test_data, results_dir=None, val_frac=None, **
     best_order = None
     results = []
 
-    for param in pdq:
+    for param in tqdm(pdq, desc="ARIMA grid", unit="candidate", leave=False):
         try:
             model = ARIMA(train_part, order=param)
             model_fit = model.fit()

@@ -1,7 +1,8 @@
 import logging
 import os
 import pandas as pd
-from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
+from tqdm import tqdm
+from sklearn.model_selection import GridSearchCV, ParameterGrid, TimeSeriesSplit
 from xgboost import XGBRegressor
 
 from ..model_config import TUNING_SETUP
@@ -33,7 +34,10 @@ def grid_search_xgboost(X_train, X_test, y_train, y_test, loss='l2', results_dir
         n_jobs=-1,
         verbose=0,
     )
-    grid_search.fit(X_train, y_train)
+    n_candidates = len(list(ParameterGrid(param_grid)))
+    with tqdm(total=n_candidates, desc=f"XGB ({loss}) grid", unit="candidate", leave=False) as pbar:
+        grid_search.fit(X_train, y_train)
+        pbar.update(n_candidates)
     best_params = grid_search.best_params_
     best_score = -grid_search.best_score_
     logger.info(f"Best XGBoost parameters: {best_params} with RMSE: {best_score:.4f}")

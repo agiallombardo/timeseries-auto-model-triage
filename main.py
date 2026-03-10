@@ -4,19 +4,23 @@ import os
 import re
 import json
 import logging
+import time
 import traceback
 import warnings
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
+from tqdm import tqdm
 
 from src.utils import setup_logging
 from src.data_handling import load_data, prepare_features, split_data
 from src.evaluation import (
     evaluate_model, plot_results, create_trellis_plot,
-    create_top_models_plot, create_performance_chart, compute_best_judgment
+    create_top_models_plot, create_performance_chart, compute_best_judgment,
+    create_radar_chart, create_residuals_plot, plot_feature_importance,
 )
+from src.report import generate_html_report
 from src.models.registry import get_available_models, get_tuning_functions
 from src.losses import LOSS_SUPPORTED_MODELS, LOSS_KEYS
 from src.model_config import (
@@ -49,6 +53,14 @@ DISPLAY_NAME_TO_REGISTRY_KEY = {
     'linear': 'lr',
 }
 
+# Model key -> family for console and judgment
+MODEL_FAMILY = {
+    'arima': 'Statistical', 'sarima': 'Statistical', 'ma': 'Statistical',
+    'es': 'Statistical', 'prophet': 'Statistical',
+    'rf': 'ML', 'svr': 'ML', 'xgb': 'ML', 'lr': 'ML',
+    'rnn': 'DL', 'lstm': 'DL', 'mlp': 'DL', 'lstm_feat': 'DL', 'rnn_feat': 'DL', 'cnn1d': 'DL',
+}
+
 
 def _format_results_for_display(df):
     """Return a copy of the results DataFrame with numeric columns formatted for consistent console/CSV display."""
@@ -62,20 +74,42 @@ def _format_results_for_display(df):
     return out
 
 
+def _model_name_to_family_map(results_df_agg):
+    """Build dict model display name -> family (Statistical, ML, DL) from aggregated results."""
+    out = {}
+    for _, row in results_df_agg.iterrows():
+        name = row['model']
+        model_key, _ = _parse_display_name(name)
+        out[name] = MODEL_FAMILY.get(model_key, "Other")
+    return out
+
+
 def _print_results_report(results_df_agg, top_models_df, judgment_text):
-    """Print a consistent results report: table, best judgment, and top 3 models."""
+    """Print a consistent results report: table, best judgment, best-by-family, and top 3 models."""
     cols = [c for c in REPORT_COLUMNS if c in results_df_agg.columns]
     if not cols:
         return
     # Table with consistent formatting
     disp = _format_results_for_display(results_df_agg)
-    print("\n" + "=" * 64)
+    sep = "=" * 100
+    print("\n" + sep)
     print("RESULTS (median across variations, sorted by composite score; test metrics = final evaluation only)")
-    print("=" * 64)
+    print(sep)
     print(disp.to_string(index=False))
-    print("-" * 64)
+    print("-" * 100)
     print("Best:", judgment_text)
-    print("=" * 64)
+    print(sep)
+    # Best by family
+    family_best = {}
+    name_to_family = _model_name_to_family_map(results_df_agg)
+    for _, row in results_df_agg.iterrows():
+        name = row['model']
+        fam = name_to_family.get(name, "Other")
+        if fam not in family_best:
+            family_best[fam] = name
+    if family_best:
+        parts = [f"  {fam} → {name}" for fam, name in sorted(family_best.items())]
+        print("\nBest by family: " + "  |  ".join(parts))
     # Top 3
     print("\nTop 3 models:")
     for i, (_, row) in enumerate(top_models_df.iterrows(), 1):
@@ -120,9 +154,9 @@ def _parse_display_name(display_name):
 
 
 def _aggregate_run_results(run_results, model_name):
-    """Aggregate n_runs evaluation dicts into one with mean metrics for reranking."""
+    """Aggregate n_runs evaluation dicts into one with mean metrics and rmse_std for reranking."""
     if not run_results:
-        return {"model": model_name, "rmse": np.nan, "mae": np.nan, "r2": np.nan, "mse": np.nan, "mase": np.nan, "mape": np.nan}
+        return {"model": model_name, "rmse": np.nan, "mae": np.nan, "r2": np.nan, "mse": np.nan, "mase": np.nan, "mape": np.nan, "rmse_std": np.nan}
     keys = ["mse", "rmse", "mae", "r2", "mase", "mape"]
     out = {"model": model_name}
     for k in keys:
@@ -132,6 +166,8 @@ def _aggregate_run_results(run_results, model_name):
         if not vals:
             continue
         out[k] = float(np.nanmean(vals))
+    rmse_vals = [r["rmse"] for r in run_results if "rmse" in r]
+    out["rmse_std"] = float(np.nanstd(rmse_vals)) if len(rmse_vals) > 1 else 0.0
     return out
 
 
@@ -140,6 +176,11 @@ def _dataset_results_dir(args):
     dataset_name = os.path.basename(args.file).split(".")[0]
     date_str = datetime.now().strftime("%Y-%m-%d")
     return os.path.join(args.output_dir, dataset_name, date_str)
+
+
+def _print_phase(n: int, total: int, message: str) -> None:
+    """Print a phase banner to the console."""
+    print(f"\n[{n}/{total}] {message}", flush=True)
 
 
 def _get_losses_for_model(model_key, requested_losses):
@@ -239,6 +280,16 @@ def main():
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
 
+    # Suppress noisy convergence and parameter warnings from statsmodels, sklearn, and Keras
+    warnings.filterwarnings("ignore", message=".*Maximum Likelihood optimization failed to converge.*")
+    warnings.filterwarnings("ignore", message=".*Non-stationary starting autoregressive parameters.*")
+    warnings.filterwarnings("ignore", message=".*Non-invertible starting MA parameters.*")
+    warnings.filterwarnings("ignore", message=".*Objective did not converge.*", module="sklearn.linear_model")
+    warnings.filterwarnings("ignore", message=".*conditioned on metric.*val_loss.*")
+
+    run_start_time = time.time()
+
+    _print_phase(1, 4, f"Loading data from {args.file}…")
     logger.info(f"Loading data from {args.file}")
     logger.info(f"Time column: {args.time_col}")
     logger.info(f"Data column: {args.data_col}")
@@ -274,7 +325,16 @@ def main():
     # Get available models and tuning functions from registry
     available_models = get_available_models()
     tuning_functions = get_tuning_functions()
-    
+    models_to_run_list = list(available_models.keys()) if "all" in args.models else [m.lower() for m in args.models]
+    models_to_run_list = [m for m in models_to_run_list if m in available_models]
+    n_models = len(models_to_run_list)
+    n_runs = default_setup.get("n_runs", 3)
+    if args.tune_all:
+        _print_phase(2, 4, f"Tuning all models (3 variations each)…")
+    else:
+        total_configs = n_runs * n_models * 3
+        _print_phase(2, 4, f"Sweeping {n_models} models × 3 variations × {n_runs} runs ({total_configs} configs)…")
+
     all_predictions, model_names, results, run_configs, best_per_run = run_models(
         args, default_setup, available_models, tuning_functions,
         X_train, X_test, y_train, y_test, train_df, test_df
@@ -311,6 +371,7 @@ def main():
     # Tune selected models (each entry is (model_key, loss) or (model_key, None))
     all_tuned_params = {}
     if models_to_tune:
+        _print_phase(3, 4, f"Tuning {len(models_to_tune)} model(s)…")
         logger.info(f"Tuning {len(models_to_tune)} model/loss combination(s)...")
         tuned_predictions, tuned_names, tuned_results, all_tuned_params = tune_selected_models(
             args, default_setup, models_to_tune, tuning_functions,
@@ -330,15 +391,19 @@ def main():
             best_params = all_tuned_params.get(params_suffix, {})
             if isinstance(best_params, int):
                 best_params = {"window": best_params}
-            run_configs.append(_build_run_config(
+                run_configs.append(_build_run_config(
                 args, default_setup, model_key, variation_index=0, variation_spec={},
                 display_name=name, tuned=True, hyperparameters=best_params, metadata=metadata,
                 n_train=len(y_train), n_test=len(y_test),
             ))
+    _print_phase(4, 4, "Saving results and generating charts…")
     process_results(
         args, default_setup, all_predictions, model_names, results, run_configs, best_per_run,
         y_train, y_test, X_train, X_test, tuning_functions, tuned_best_params=all_tuned_params
     )
+    elapsed = time.time() - run_start_time
+    logger.info("Total run time: %.1f s (%.1f min)", elapsed, elapsed / 60.0)
+    print(f"\nTotal run time: {elapsed:.1f} s ({elapsed / 60:.1f} min)", flush=True)
 
 def run_models(args, default_setup, available_models, tuning_functions, X_train, X_test, y_train, y_test, train_df, test_df):
     """Run exactly 3 variations per model (built-in defaults), no tuning. Returns predictions, names, results, run_configs, best_per_run."""
@@ -402,13 +467,16 @@ def _run_models_impl(args, default_setup, available_models, tuning_functions, X_
     first_run_names = []
     best_per_run = []
 
-    for run_idx in range(n_runs):
+    for run_idx in tqdm(range(n_runs), desc="Runs", unit="run"):
         logger.info(f"=== Program run {run_idx + 1}/{n_runs} ===")
         run_preds = []
         run_results = []
-        for model_key in models_to_run:
+        model_bar = tqdm(models_to_run, desc=f"Run {run_idx + 1}/{n_runs}", unit="model", leave=False)
+        for model_key in model_bar:
             if model_key not in available_models:
                 continue
+            model_bar.set_postfix(model=model_key)
+            t0_model = time.time()
             variations = get_variations_for_model(model_key)
             metadata = get_metadata_for_model(model_key)
             default_hp = dict(metadata.get("default_hyperparameters", {})) if metadata else {}
@@ -423,9 +491,13 @@ def _run_models_impl(args, default_setup, available_models, tuning_functions, X_
                     logger.info(
                         f"Running {model_key.upper()}" + (f" ({loss_key.upper()})" if loss_key else "") + " ..."
                     )
+                    t0 = time.time()
                     pred, name = execute_model(model_key, available_models, model_params)
+                    metrics = evaluate_model(y_test, pred, name, y_train)
+                    elapsed = time.time() - t0
                     run_preds.append(np.asarray(pred))
-                    run_results.append(evaluate_model(y_test, pred, name, y_train))
+                    run_results.append(metrics)
+                    logger.info(f"  var {variation_index + 1}/3 → RMSE={metrics['rmse']:.4f}  ({elapsed:.1f}s)")
                     if run_idx == 0:
                         first_run_names.append(name)
                         run_configs.append(_build_run_config(
@@ -436,6 +508,7 @@ def _run_models_impl(args, default_setup, available_models, tuning_functions, X_
                 except Exception as e:
                     logger.error(f"Error with {model_key.upper()} (variation {variation_index}): {e}")
                     logger.error(traceback.format_exc())
+            logger.info(f"{model_key.upper()} completed in {time.time() - t0_model:.1f}s")
         all_runs_preds.append(run_preds)
         all_runs_results.append(run_results)
 
@@ -458,6 +531,13 @@ def _run_models_impl(args, default_setup, available_models, tuning_functions, X_
             })
             logger.info(f"Run {run_idx + 1} best: {best_row['model']} (composite={best_row['composite_score']:.4f})")
 
+    # Per-run composite scores for composite_std (same row order as all_runs_results[r])
+    run_scored_dfs = []
+    for r in range(n_runs):
+        run_df = pd.DataFrame(all_runs_results[r])
+        _, _, scored = compute_best_judgment(run_df)
+        run_scored_dfs.append(scored)
+
     # Aggregate across program runs: mean metrics and mean predictions per model; rerank by mean metrics
     n_models = len(first_run_names)
     for i in range(n_models):
@@ -468,7 +548,18 @@ def _run_models_impl(args, default_setup, available_models, tuning_functions, X_
             continue
         all_predictions.append(np.mean(pred_arrays, axis=0))
         model_names.append(name)
-        results.append(_aggregate_run_results(result_dicts, name))
+        result = _aggregate_run_results(result_dicts, name)
+        # composite_std across runs (look up by model name in each run's scored df)
+        composite_scores = []
+        for r in range(n_runs):
+            if r >= len(run_scored_dfs):
+                break
+            sr = run_scored_dfs[r]
+            match = sr[sr['model'] == name]['composite_score']
+            if len(match) > 0:
+                composite_scores.append(float(match.iloc[0]))
+        result['composite_std'] = float(np.nanstd(composite_scores)) if len(composite_scores) > 1 else 0.0
+        results.append(result)
 
     return all_predictions, model_names, results, run_configs, best_per_run
 
@@ -534,6 +625,10 @@ def process_results(args, default_setup, all_predictions, model_names, results, 
         row = {'model': model_name, 'best_variation_index': best_idx}
         for c in metric_cols:
             row[c] = medians[c]
+        if 'rmse_std' in group.columns:
+            row['rmse_std'] = group['rmse_std'].median()
+        if 'composite_std' in group.columns:
+            row['composite_std'] = group['composite_std'].median()
         row['variation_spec'] = cfg.get('variation_spec', {})
         row['hyperparameters'] = cfg.get('hyperparameters', {})
         agg_list.append(row)
@@ -581,12 +676,25 @@ def process_results(args, default_setup, all_predictions, model_names, results, 
         results_df_agg,
         os.path.join(dataset_results_dir, 'model_performance.png')
     )
+    create_radar_chart(
+        results_df_agg,
+        os.path.join(dataset_results_dir, 'model_radar.png'),
+        max_models=5,
+    )
+    if valid_names and top_model_predictions:
+        create_residuals_plot(
+            y_test, top_model_predictions, valid_names,
+            os.path.join(dataset_results_dir, 'top_3_residuals.png'),
+        )
+    plot_feature_importance(
+        dataset_results_dir,
+        os.path.join(dataset_results_dir, 'feature_importance.png'),
+    )
 
-    # Best model = highest median composite (one row per model)
-    best_row = results_df_agg.iloc[0]
+    # Best model and judgment (with margin and family)
+    model_name_to_family = _model_name_to_family_map(results_df_agg)
+    best_row, judgment_text, _ = compute_best_judgment(results_df_agg, model_name_to_family=model_name_to_family)
     best_model_name = best_row['model']
-    judgment_text = f"Recommended model: {best_model_name} (median composite score: {best_row['composite_score']:.4f}). Best balance across RMSE, MAE, R², MASE, and MAPE among the tested models."
-
     logger.info(f"Best model: {best_model_name} (composite={best_row['composite_score']:.4f}, RMSE={best_row['rmse']:.4f})")
 
     dataset_name = os.path.basename(args.file).split(".")[0]
@@ -610,6 +718,10 @@ def process_results(args, default_setup, all_predictions, model_names, results, 
             entry['mase'] = float(row['mase'])
         if 'mape' in row and not (pd.isna(row['mape']) or np.isinf(row['mape'])):
             entry['mape'] = float(row['mape'])
+        if 'rmse_std' in row and pd.notna(row.get('rmse_std')):
+            entry['rmse_std'] = round(float(row['rmse_std']), 4)
+        if 'composite_std' in row and pd.notna(row.get('composite_std')):
+            entry['composite_std'] = round(float(row['composite_std']), 4)
         results_list.append(entry)
 
     results_summary = {
@@ -638,6 +750,8 @@ def process_results(args, default_setup, all_predictions, model_names, results, 
         json.dump(results_summary, f, indent=2)
     logger.info(f"Results summary saved to '{summary_path}'")
 
+    generate_html_report(dataset_results_dir, results_summary, results_df_agg)
+
     # Console report (same column order and formatting as CSV)
     _print_results_report(results_df_agg, top_models_df, judgment_text)
 
@@ -657,9 +771,13 @@ def tune_selected_models(args, default_setup, models_to_tune, tuning_functions,
     # models_to_tune is list of (model_key, loss) or (model_key, None)
     all_tuned_params = {}
     models_that_will_tune = [(mk, loss) for (mk, loss) in models_to_tune if mk in tuning_functions]
-    for model_key, loss_key in models_that_will_tune:
+    tune_bar = tqdm(models_that_will_tune, desc="Tuning", unit="model")
+    for model_key, loss_key in tune_bar:
+        label = f"{model_key.upper()}" + (f" ({loss_key.upper()})" if loss_key else "")
+        tune_bar.set_postfix(model=label)
         try:
-            logger.info(f"Tuning {model_key.upper()}" + (f" ({loss_key.upper()})" if loss_key else "") + " ...")
+            t0 = time.time()
+            logger.info(f"Tuning {label} ...")
             step = default_setup["n_steps_univariate"] if model_key in ("rnn", "lstm") else default_setup["n_steps_feature"]
             model_params = {
                 "y_train": y_train, "y_test": y_test,
@@ -679,6 +797,7 @@ def tune_selected_models(args, default_setup, models_to_tune, tuning_functions,
 
             params_suffix = f"{model_key}_{loss_key}" if loss_key else model_key
             all_tuned_params[params_suffix] = best_params if best_params is not None else {}
+            logger.info(f"  {label} tuning done in {time.time() - t0:.1f}s")
         except Exception as e:
             logger.error(f"Error tuning {model_key.upper()} model: {e}")
             logger.error(f"Traceback: {traceback.format_exc()}")

@@ -1,6 +1,7 @@
 import logging
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 from sklearn.linear_model import Ridge, Lasso, HuberRegressor, QuantileRegressor
 from sklearn.preprocessing import StandardScaler
 
@@ -21,7 +22,7 @@ def grid_search_linear_regression(X_train, X_test, y_train, y_test, loss='l2'):
     best_predictions = None
 
     if loss == 'l2':
-        for alpha in [0.01, 0.1, 1.0, 10.0]:
+        for alpha in tqdm([0.01, 0.1, 1.0, 10.0], desc="LR (L2) grid", unit="candidate", leave=False):
             model = Ridge(alpha=alpha)
             rmses = []
             for train_idx, val_idx in splits:
@@ -38,7 +39,7 @@ def grid_search_linear_regression(X_train, X_test, y_train, y_test, loss='l2'):
             model.fit(X_train, y_train)
             best_predictions = model.predict(X_test)
     elif loss == 'l1':
-        for alpha in [0.001, 0.01, 0.1, 1.0]:
+        for alpha in tqdm([0.001, 0.01, 0.1, 1.0], desc="LR (L1) grid", unit="candidate", leave=False):
             model = Lasso(alpha=alpha, max_iter=10000)
             rmses = []
             for train_idx, val_idx in splits:
@@ -60,7 +61,7 @@ def grid_search_linear_regression(X_train, X_test, y_train, y_test, loss='l2'):
         X_test_sc = scaler.transform(X_test)
         X_train_sc = pd.DataFrame(X_train_sc, index=X_train.index, columns=X_train.columns)
         X_test_sc = pd.DataFrame(X_test_sc, index=X_test.index, columns=X_test.columns)
-        for epsilon in [1.0, 1.35, 2.0]:
+        for epsilon in tqdm([1.0, 1.35, 2.0], desc="LR (Huber) grid", unit="candidate", leave=False):
             model = HuberRegressor(epsilon=epsilon, max_iter=2000)
             rmses = []
             for train_idx, val_idx in splits:

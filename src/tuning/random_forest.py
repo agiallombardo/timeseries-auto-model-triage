@@ -1,8 +1,9 @@
 import logging
 import os
 import pandas as pd
+from tqdm import tqdm
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
+from sklearn.model_selection import GridSearchCV, ParameterGrid, TimeSeriesSplit
 
 from ..model_config import TUNING_SETUP
 from ..models.random_forest import run_random_forest
@@ -32,7 +33,10 @@ def grid_search_random_forest(X_train, X_test, y_train, y_test, loss='l2', resul
         n_jobs=-1,
         verbose=0,
     )
-    grid_search.fit(X_train, y_train)
+    n_candidates = len(list(ParameterGrid(param_grid)))
+    with tqdm(total=n_candidates, desc=f"RF ({loss}) grid", unit="candidate", leave=False) as pbar:
+        grid_search.fit(X_train, y_train)
+        pbar.update(n_candidates)
     best_params = grid_search.best_params_
     best_score = -grid_search.best_score_
     logger.info(f"Best Random Forest parameters: {best_params} with RMSE: {best_score:.4f}")

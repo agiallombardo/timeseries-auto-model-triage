@@ -1,11 +1,13 @@
+import glob
+import logging
+import os
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 from mpl_toolkits.axes_grid1.inset_locator import zoomed_inset_axes, mark_inset
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-import logging
-import os
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +71,7 @@ def evaluate_model(y_true, y_pred, model_name, y_train=None):
     return metrics
 
 
-def compute_best_judgment(results_df):
+def compute_best_judgment(results_df, model_name_to_family=None):
     """
     Evaluate all models holistically and produce a best judgment.
 
@@ -81,6 +83,8 @@ def compute_best_judgment(results_df):
     -----------
     results_df : pandas.DataFrame
         DataFrame with columns: model, rmse, mae, r2, and optionally mase, mape
+    model_name_to_family : dict, optional
+        Map display name -> family string (e.g. "Statistical", "ML", "DL") for richer judgment text.
 
     Returns:
     --------
@@ -182,6 +186,12 @@ def compute_best_judgment(results_df):
         else:
             parts.append(f"MASE = {mase:.2f}: consider simpler baselines if parsimony is important.")
 
+    if len(sort_df) >= 2:
+        margin = float(sort_df.iloc[0]['composite_score'] - sort_df.iloc[1]['composite_score'])
+        parts.append(f"Leads 2nd place by {margin:.3f} composite points.")
+    if model_name_to_family and name in model_name_to_family:
+        parts.append(f"Model family: {model_name_to_family[name]}.")
+
     judgment_text = " ".join(parts)
     return best_row, judgment_text, sort_df
 
@@ -273,16 +283,18 @@ def create_trellis_plot(y_train, y_test, predictions, model_names, results_df, s
         model_metrics = results_df[results_df['model'] == name].iloc[0]
         rmse = model_metrics['rmse']
         r2 = model_metrics['r2']
-        
+        composite = model_metrics.get('composite_score', np.nan)
+        composite_str = f"Composite: {composite:.3f} | " if pd.notna(composite) else ""
+
         # Plot training data (partially transparent)
         ax.plot(y_train.index, y_train, 'b-', alpha=0.3, label='Training Data')
-        
+
         # Plot test data and predictions
         ax.plot(y_test.index, y_test, 'g-', label='Actual Test Data')
         ax.plot(y_test.index, pred, 'r-', label='Predictions')
-        
+
         # Add title with metrics
-        ax.set_title(f"{name}\nRMSE: {rmse:.2f}, R²: {r2:.2f}")
+        ax.set_title(f"{name}\n{composite_str}RMSE: {rmse:.2f}, R²: {r2:.2f}")
         
         # Only add legend to the first plot to save space
         if i == 0:
@@ -375,27 +387,35 @@ def create_performance_chart(results_df, save_path='model_performance.png'):
     save_path : str
         Path to save the plot
     """
-    # Sort by composite score if available, else RMSE
+    # Sort by composite score if available, else RMSE; include mase/mape for panels
     base_cols = ['model', 'rmse', 'mae', 'r2']
     if 'composite_score' in results_df.columns:
         base_cols = ['model', 'composite_score', 'rmse', 'mae', 'r2']
-    metrics_df = results_df[[c for c in base_cols if c in results_df.columns]].copy()
+    optional = ['mase', 'mape']
+    all_cols = [c for c in base_cols + optional if c in results_df.columns]
+    metrics_df = results_df[all_cols].copy()
     if 'composite_score' in metrics_df.columns:
         metrics_df = metrics_df.sort_values('composite_score', ascending=False)
     else:
         metrics_df = metrics_df.sort_values('rmse')
-    
+    metrics_df = metrics_df.reset_index(drop=True)
+
     # Set up colors based on performance
     top_3_mask = metrics_df.index < 3
     colors = np.where(top_3_mask, '#1f77b4', '#d3d3d3')  # Blue for top 3, gray for others
-    
-    # Create figure (4 columns if composite_score available)
-    n_plots = 4 if 'composite_score' in metrics_df.columns else 3
+
+    # Build list of panels: composite, rmse, mae, r2, mase, mape (include all available)
+    has_composite = 'composite_score' in metrics_df.columns
+    has_mase = 'mase' in metrics_df.columns
+    has_mape = 'mape' in metrics_df.columns
+    n_plots = (4 if has_composite else 3) + (1 if has_mase else 0) + (1 if has_mape else 0)
     fig, axes = plt.subplots(1, n_plots, figsize=(6 * n_plots, 8))
+    if n_plots == 1:
+        axes = [axes]
 
     # Composite score plot (higher is better) - first if available
     ax_idx = 0
-    if 'composite_score' in metrics_df.columns:
+    if has_composite:
         axes[ax_idx].barh(metrics_df['model'], metrics_df['composite_score'], color=colors)
         axes[ax_idx].set_title('Composite Score (higher is better)', fontsize=14)
         axes[ax_idx].set_xlabel('Score', fontsize=12)
@@ -434,7 +454,37 @@ def create_performance_chart(results_df, save_path='model_performance.png'):
     axes[ax_idx].invert_yaxis()
     for i, v in enumerate(metrics_df['r2']):
         axes[ax_idx].text(v + 0.05, i, f"{v:.2f}", va='center')
-    
+    ax_idx += 1
+
+    # MASE plot (lower is better; accent for MASE > 1)
+    if has_mase:
+        mase_vals = metrics_df['mase'].replace([np.inf, -np.inf], np.nan).fillna(10)
+        mase_colors = np.where(mase_vals > 1, '#ff7f0e', colors)  # Orange when worse than naïve
+        axes[ax_idx].barh(metrics_df['model'], mase_vals, color=mase_colors)
+        axes[ax_idx].axvline(x=1, color='gray', linestyle='--', alpha=0.7)
+        axes[ax_idx].set_title('MASE (lower is better, <1 beats naïve)', fontsize=14)
+        axes[ax_idx].set_xlabel('MASE', fontsize=12)
+        axes[ax_idx].grid(True, alpha=0.3, axis='x')
+        axes[ax_idx].invert_yaxis()
+        for i, v in enumerate(metrics_df['mase']):
+            if pd.notna(v) and not np.isinf(v):
+                axes[ax_idx].text(float(v) + 0.05, i, f"{v:.2f}", va='center')
+        ax_idx += 1
+
+    # MAPE plot (lower is better; clip display at 200%)
+    if has_mape:
+        mape_vals = metrics_df['mape'].replace([np.inf, -np.inf], np.nan).clip(upper=200)
+        axes[ax_idx].barh(metrics_df['model'], mape_vals, color=colors)
+        axes[ax_idx].set_title('MAPE % (lower is better)', fontsize=14)
+        axes[ax_idx].set_xlabel('MAPE (%)', fontsize=12)
+        axes[ax_idx].grid(True, alpha=0.3, axis='x')
+        axes[ax_idx].invert_yaxis()
+        for i, v in enumerate(metrics_df['mape']):
+            if pd.notna(v) and not np.isinf(v):
+                disp_v = min(float(v), 200)
+                axes[ax_idx].text(disp_v + 1, i, f"{v:.1f}%", va='center')
+        ax_idx += 1
+
     # Add overall title
     plt.suptitle('Model Performance Comparison', fontsize=16)
     plt.tight_layout()
@@ -443,5 +493,133 @@ def create_performance_chart(results_df, save_path='model_performance.png'):
     # Save the plot
     plt.savefig(save_path, bbox_inches='tight')
     plt.close()
-    
+
     logger.info(f"Performance chart saved as '{save_path}'")
+
+
+def _normalized_scores_for_radar(df):
+    """Return DataFrame with columns model + composite_score + _s_rmse, _s_mae, _s_r2, _s_mase, _s_mape (0-1, 1=best)."""
+    out = df[['model']].copy()
+    if 'composite_score' in df.columns:
+        out['composite_score'] = df['composite_score']
+    # RMSE: lower better -> invert
+    r_min, r_max = df['rmse'].min(), df['rmse'].max()
+    out['_s_rmse'] = 1 - (df['rmse'] - r_min) / (r_max - r_min) if r_max > r_min else 1.0
+    m_min, m_max = df['mae'].min(), df['mae'].max()
+    out['_s_mae'] = 1 - (df['mae'] - m_min) / (m_max - m_min) if m_max > m_min else 1.0
+    r2_min, r2_max = df['r2'].min(), df['r2'].max()
+    out['_s_r2'] = (df['r2'] - r2_min) / (r2_max - r2_min) if r2_max > r2_min else (1.0 if df['r2'].max() >= 0 else 0.0)
+    if 'mase' in df.columns:
+        mase = df['mase'].replace([np.inf, -np.inf], np.nan).clip(upper=10)
+        valid = mase.notna()
+        m_min_m, m_max_m = mase.min(), mase.max()
+        out['_s_mase'] = np.where(valid, 1 - (mase - m_min_m) / (m_max_m - m_min_m) if m_max_m > m_min_m else 1.0, 0.5)
+    else:
+        out['_s_mase'] = 0.5
+    if 'mape' in df.columns:
+        mape = df['mape'].replace([np.inf, -np.inf], np.nan).clip(upper=200)
+        valid = mape.notna()
+        p_min, p_max = mape.min(), mape.max()
+        out['_s_mape'] = np.where(valid, 1 - (mape - p_min) / (p_max - p_min) if p_max > p_min else 1.0, 0.5)
+    else:
+        out['_s_mape'] = 0.5
+    return out
+
+
+def create_radar_chart(results_df, save_path='model_radar.png', max_models=5):
+    """
+    Create a radar (spider) chart of normalized metrics for the top N models.
+    Axes: Composite, RMSE, MAE, R², MASE, MAPE (all 0-1, 1=best).
+    """
+    sort_col = 'composite_score' if 'composite_score' in results_df.columns else 'rmse'
+    ascending = False if sort_col == 'composite_score' else True
+    top = results_df.sort_values(sort_col, ascending=ascending).head(max_models)
+    if len(top) == 0:
+        return
+    norm = _normalized_scores_for_radar(top)
+    labels = ['Composite', 'RMSE', 'MAE', 'R²', 'MASE', 'MAPE']
+    cols = ['composite_score', '_s_rmse', '_s_mae', '_s_r2', '_s_mase', '_s_mape']
+    if 'composite_score' not in norm.columns:
+        labels = labels[1:]
+        cols = cols[1:]
+    n_axes = len(cols)
+    angles = np.linspace(0, 2 * np.pi, n_axes, endpoint=False)
+    angles = np.concatenate([angles, [angles[0]]])
+
+    fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(projection='polar'))
+    colors = plt.cm.tab10(np.linspace(0, 1, max_models))
+    for i, (_, row) in enumerate(norm.iterrows()):
+        vals = [row[c] for c in cols]
+        vals = np.concatenate([vals, [vals[0]]])
+        ax.plot(angles, vals, 'o-', linewidth=1.5, label=row['model'], color=colors[i % max_models])
+        ax.fill(angles, vals, alpha=0.15, color=colors[i % max_models])
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(labels, size=10)
+    ax.set_ylim(0, 1)
+    ax.set_yticks([0.25, 0.5, 0.75, 1.0])
+    ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.0), fontsize=8)
+    ax.set_title('Top models – normalized metrics (1 = best)', fontsize=14)
+    plt.tight_layout()
+    plt.savefig(save_path, bbox_inches='tight')
+    plt.close()
+    logger.info(f"Radar chart saved as '{save_path}'")
+
+
+def create_residuals_plot(y_test, predictions, model_names, save_path='top_3_residuals.png', rolling_window=5):
+    """
+    Plot residuals (predicted - actual) for the top 3 models; optional rolling mean to show bias.
+    """
+    if not predictions or not model_names:
+        return
+    n = min(3, len(predictions), len(model_names))
+    y_test = np.asarray(y_test)
+    fig, axes = plt.subplots(n, 1, figsize=(12, 3 * n), sharex=True)
+    if n == 1:
+        axes = [axes]
+    for i in range(n):
+        res = np.asarray(predictions[i]) - y_test
+        axes[i].axhline(0, color='gray', linestyle='--', alpha=0.8)
+        axes[i].plot(res, 'o-', markersize=3, alpha=0.7, label='Residual')
+        if len(res) >= rolling_window:
+            roll = pd.Series(res).rolling(rolling_window, center=True).mean()
+            axes[i].plot(roll.values, '-', linewidth=2, label=f'Rolling mean (w={rolling_window})')
+        axes[i].set_ylabel('Residual')
+        axes[i].set_title(model_names[i])
+        axes[i].legend(loc='upper right', fontsize=8)
+        axes[i].grid(True, alpha=0.3)
+    axes[-1].set_xlabel('Time index')
+    plt.suptitle('Top 3 models – residuals (predicted − actual)', fontsize=14)
+    plt.tight_layout()
+    plt.savefig(save_path, bbox_inches='tight')
+    plt.close()
+    logger.info(f"Residuals plot saved as '{save_path}'")
+
+
+def plot_feature_importance(results_dir, save_path='feature_importance.png'):
+    """
+    Read rf_feature_importance.csv and/or xgb_feature_importance.csv from results_dir
+    and plot horizontal bar charts (one subplot per model).
+    """
+    patterns = ['rf_feature_importance.csv', 'xgb_feature_importance.csv']
+    files = []
+    for p in patterns:
+        files.extend(glob.glob(os.path.join(results_dir, p)))
+    if not files:
+        return
+    n = len(files)
+    fig, axes = plt.subplots(n, 1, figsize=(10, 4 * n))
+    if n == 1:
+        axes = [axes]
+    for ax, path in zip(axes, files):
+        df = pd.read_csv(path)
+        if 'feature' not in df.columns or 'importance' not in df.columns:
+            continue
+        df = df.sort_values('importance', ascending=True).tail(20)
+        ax.barh(df['feature'], df['importance'], color='#1f77b4', alpha=0.8)
+        ax.set_xlabel('Importance')
+        ax.set_title(os.path.basename(path).replace('_feature_importance.csv', '').upper())
+        ax.grid(True, alpha=0.3, axis='x')
+    plt.tight_layout()
+    plt.savefig(save_path, bbox_inches='tight')
+    plt.close()
+    logger.info(f"Feature importance plot saved as '{save_path}'")

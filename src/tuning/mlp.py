@@ -1,7 +1,10 @@
 import logging
 import os
+from itertools import product
+
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Input, Dropout
 from tensorflow.keras.optimizers import Adam
@@ -49,35 +52,35 @@ def grid_search_mlp(X_train, X_test, y_train, y_test, loss='l2', results_dir=Non
     best_params = None
     results = []
     early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+    combos = list(product(activations, units_list, dropout_rates, learning_rates))
 
-    for act in activations:
-        for units in units_list:
-            for dr in dropout_rates:
-                for lr in learning_rates:
-                    try:
-                        model = Sequential([
-                            Input(shape=(X_tr.shape[1],)),
-                            Dense(units, activation=act),
-                            Dropout(dr),
-                            Dense(units // 2, activation=act),
-                            Dropout(dr),
-                            Dense(1),
-                        ])
-                        model.compile(optimizer=Adam(learning_rate=lr), loss=get_keras_loss(loss))
-                        model.fit(X_tr, y_tr, epochs=100, batch_size=32,
-                                  validation_data=(X_val, y_val),
-                                  callbacks=[early_stopping], verbose=0)
-                        val_pred = model.predict(X_val, verbose=0).ravel()
-                        rmse = score_validation_rmse(y_val, val_pred)
-                        results.append({'activation': act, 'units': units, 'dropout': dr,
-                                        'learning_rate': lr, 'rmse': rmse})
-                        if rmse < best_rmse:
-                            best_rmse = rmse
-                            best_params = {'activation': act, 'units': units,
-                                           'dropout': dr, 'learning_rate': lr}
-                    except Exception as e:
-                        logger.warning("Error training MLP: %s", e)
-                        continue
+    for (act, units, dr, lr) in tqdm(
+        combos, desc=f"MLP ({loss}) grid", unit="candidate", leave=False
+    ):
+        try:
+            model = Sequential([
+                Input(shape=(X_tr.shape[1],)),
+                Dense(units, activation=act),
+                Dropout(dr),
+                Dense(units // 2, activation=act),
+                Dropout(dr),
+                Dense(1),
+            ])
+            model.compile(optimizer=Adam(learning_rate=lr), loss=get_keras_loss(loss))
+            model.fit(X_tr, y_tr, epochs=100, batch_size=32,
+                      validation_data=(X_val, y_val),
+                      callbacks=[early_stopping], verbose=0)
+            val_pred = model.predict(X_val, verbose=0).ravel()
+            rmse = score_validation_rmse(y_val, val_pred)
+            results.append({'activation': act, 'units': units, 'dropout': dr,
+                            'learning_rate': lr, 'rmse': rmse})
+            if rmse < best_rmse:
+                best_rmse = rmse
+                best_params = {'activation': act, 'units': units,
+                               'dropout': dr, 'learning_rate': lr}
+        except Exception as e:
+            logger.warning("Error training MLP: %s", e)
+            continue
 
     logger.info("Best MLP parameters: %s with RMSE: %.4f", best_params, best_rmse)
     if results:

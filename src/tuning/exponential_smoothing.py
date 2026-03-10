@@ -1,7 +1,10 @@
 import logging
 import os
+from itertools import product
+
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 
 from ..models.exponential_smoothing import run_exponential_smoothing
@@ -32,38 +35,38 @@ def grid_search_exponential_smoothing(train_data, test_data, seasonal_periods=12
 
     trend_types = ["add", "mul", None]
     seasonal_types = ["add", "mul", None]
+    combos = list(product(trend_types, seasonal_types))
 
     best_rmse = float("inf")
     best_params = None
     results = []
 
-    for trend in trend_types:
-        for seasonal in seasonal_types:
-            if seasonal is not None and len(train_part) < 2 * seasonal_periods:
-                continue
-            try:
-                model = ExponentialSmoothing(
-                    train_part,
-                    trend=trend,
-                    seasonal=seasonal,
-                    seasonal_periods=seasonal_periods if seasonal else None,
-                )
-                model_fit = model.fit()
-                forecast = model_fit.forecast(steps=n_val)
-                rmse = score_validation_rmse(val_part, forecast)
-                params_dict = {"trend": trend, "seasonal": seasonal}
-                results.append({
-                    "trend": trend,
-                    "seasonal": seasonal,
-                    "validation_rmse": rmse,
-                    "params": params_dict,
-                })
-                if rmse < best_rmse:
-                    best_rmse = rmse
-                    best_params = (trend, seasonal)
-                logger.debug(f"ETS(trend={trend}, seasonal={seasonal}) - validation RMSE: {rmse:.4f}")
-            except Exception:
-                continue
+    for (trend, seasonal) in tqdm(combos, desc="ETS grid", unit="candidate", leave=False):
+        if seasonal is not None and len(train_part) < 2 * seasonal_periods:
+            continue
+        try:
+            model = ExponentialSmoothing(
+                train_part,
+                trend=trend,
+                seasonal=seasonal,
+                seasonal_periods=seasonal_periods if seasonal else None,
+            )
+            model_fit = model.fit()
+            forecast = model_fit.forecast(steps=n_val)
+            rmse = score_validation_rmse(val_part, forecast)
+            params_dict = {"trend": trend, "seasonal": seasonal}
+            results.append({
+                "trend": trend,
+                "seasonal": seasonal,
+                "validation_rmse": rmse,
+                "params": params_dict,
+            })
+            if rmse < best_rmse:
+                best_rmse = rmse
+                best_params = (trend, seasonal)
+            logger.debug(f"ETS(trend={trend}, seasonal={seasonal}) - validation RMSE: {rmse:.4f}")
+        except Exception:
+            continue
 
     logger.info(f"Best Exponential Smoothing parameters: trend={best_params[0]}, seasonal={best_params[1]} with validation RMSE: {best_rmse:.4f}")
     best_predictions = run_exponential_smoothing(

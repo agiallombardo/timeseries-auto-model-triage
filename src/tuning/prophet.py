@@ -3,6 +3,7 @@ import logging
 import os
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 from prophet import Prophet
 
 from ..model_config import TUNING_SETUP
@@ -38,7 +39,7 @@ def grid_search_prophet(train_data, test_data, results_dir=None, **kwargs):
     
     rmses = []
     
-    for params in all_params:
+    for params in tqdm(all_params, desc="Prophet grid", unit="candidate", leave=False):
         model = Prophet(**params)
         model.fit(train_val)
         forecast = model.predict(val_df)

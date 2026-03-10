@@ -1,7 +1,8 @@
 import logging
 import os
 import pandas as pd
-from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
+from tqdm import tqdm
+from sklearn.model_selection import GridSearchCV, ParameterGrid, TimeSeriesSplit
 from sklearn.svm import SVR
 from sklearn.preprocessing import StandardScaler
 
@@ -33,9 +34,12 @@ def grid_search_svr(X_train, X_test, y_train, y_test, results_dir=None, **kwargs
         cv=tscv,
         scoring='neg_root_mean_squared_error',
         n_jobs=-1,
-        verbose=1,
+        verbose=0,
     )
-    grid_search.fit(X_train_scaled, y_train_scaled)
+    n_candidates = len(list(ParameterGrid(param_grid)))
+    with tqdm(total=n_candidates, desc="SVR grid", unit="candidate", leave=False) as pbar:
+        grid_search.fit(X_train_scaled, y_train_scaled)
+        pbar.update(n_candidates)
     best_params = grid_search.best_params_
     best_score = -grid_search.best_score_
     logger.info(f"Best SVR parameters: {best_params} with RMSE: {best_score:.4f}")

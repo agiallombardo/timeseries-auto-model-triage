@@ -1,7 +1,10 @@
 import logging
 import os
+from itertools import product
+
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Input, LSTM, Dropout
 from tensorflow.keras.optimizers import Adam
@@ -35,64 +38,69 @@ def grid_search_lstm_features(X_train, X_test, y_train, y_test, loss='l2', resul
     best_params = None
     results = []
     max_combinations = 24
-    combinations_tested = 0
-
+    combos = []
     for n_steps in n_steps_list:
-        X_tr_seq, X_te_seq, y_tr_seq, _ = prepare_feature_sequences(
-            X_train, X_test, y_train, y_test, n_steps)
-        if len(X_tr_seq) == 0:
-            continue
-        n_features = X_tr_seq.shape[2]
-
-        scaler_obj = get_scaler(scaler, feature_range=feature_range)
-        if scaler_obj is not None:
-            scaler_obj.fit(X_tr_seq.reshape(-1, n_features))
-            X_tr_sc = scaler_obj.transform(X_tr_seq.reshape(-1, n_features)).reshape(X_tr_seq.shape)
-        else:
-            X_tr_sc = X_tr_seq.copy()
-
-        val_frac = TUNING_SETUP.get("val_frac", 0.2)
-        train_idx, val_idx = get_chronological_holdout_indices(len(X_tr_sc), val_frac)
-        X_tr_s, X_val_s = X_tr_sc[train_idx], X_tr_sc[val_idx]
-        y_tr_s, y_val_s = y_tr_seq[train_idx], y_tr_seq[val_idx]
-
-        for act in activations:
-            for units in units_list:
-                for dr in dropout_rates:
-                    for lr in learning_rates:
-                        if combinations_tested >= max_combinations:
-                            break
-                        try:
-                            model = Sequential()
-                            model.add(Input(shape=(n_steps, n_features)))
-                            model.add(LSTM(units, activation=act))
-                            if dr > 0:
-                                model.add(Dropout(dr))
-                            model.add(Dense(1))
-                            model.compile(optimizer=Adam(learning_rate=lr), loss=get_keras_loss(loss))
-                            es = EarlyStopping(monitor='val_loss', patience=10,
-                                               restore_best_weights=True)
-                            model.fit(X_tr_s, y_tr_s, epochs=50, batch_size=32,
-                                      validation_data=(X_val_s, y_val_s),
-                                      callbacks=[es], verbose=0)
-                            val_pred = model.predict(X_val_s, verbose=0).ravel()
-                            rmse = score_validation_rmse(y_val_s, val_pred)
-                            results.append({'n_steps': n_steps, 'activation': act, 'units': units,
-                                            'dropout': dr, 'learning_rate': lr, 'rmse': rmse})
-                            if rmse < best_rmse:
-                                best_rmse = rmse
-                                best_params = {'n_steps': n_steps, 'activation': act,
-                                               'units': units, 'dropout': dr, 'learning_rate': lr}
-                            combinations_tested += 1
-                        except Exception as e:
-                            logger.warning("Error training LSTM-feat: %s", e)
-                            continue
-                if combinations_tested >= max_combinations:
-                    break
-            if combinations_tested >= max_combinations:
+        for combo in product(activations, units_list, dropout_rates, learning_rates):
+            combos.append((n_steps,) + combo)
+            if len(combos) >= max_combinations:
                 break
-        if combinations_tested >= max_combinations:
+        if len(combos) >= max_combinations:
             break
+    combos = combos[:max_combinations]
+    n_steps_cache = {}
+
+    for (n_steps, act, units, dr, lr) in tqdm(
+        combos, desc=f"LSTM-feat ({loss}) grid", unit="candidate", leave=False
+    ):
+        if n_steps not in n_steps_cache:
+            X_tr_seq, X_te_seq, y_tr_seq, _ = prepare_feature_sequences(
+                X_train, X_test, y_train, y_test, n_steps)
+            if len(X_tr_seq) == 0:
+                n_steps_cache[n_steps] = None
+                continue
+            n_features = X_tr_seq.shape[2]
+            scaler_obj = get_scaler(scaler, feature_range=feature_range)
+            if scaler_obj is not None:
+                scaler_obj.fit(X_tr_seq.reshape(-1, n_features))
+                X_tr_sc = scaler_obj.transform(X_tr_seq.reshape(-1, n_features)).reshape(X_tr_seq.shape)
+            else:
+                X_tr_sc = X_tr_seq.copy()
+            val_frac = TUNING_SETUP.get("val_frac", 0.2)
+            train_idx, val_idx = get_chronological_holdout_indices(len(X_tr_sc), val_frac)
+            n_steps_cache[n_steps] = (
+                X_tr_sc[train_idx], X_tr_sc[val_idx],
+                y_tr_seq[train_idx], y_tr_seq[val_idx],
+                n_features,
+            )
+        cached = n_steps_cache.get(n_steps)
+        if cached is None:
+            continue
+        X_tr_s, X_val_s, y_tr_s, y_val_s = cached[:4]
+        n_features = cached[4]
+        try:
+            model = Sequential()
+            model.add(Input(shape=(n_steps, n_features)))
+            model.add(LSTM(units, activation=act))
+            if dr > 0:
+                model.add(Dropout(dr))
+            model.add(Dense(1))
+            model.compile(optimizer=Adam(learning_rate=lr), loss=get_keras_loss(loss))
+            es = EarlyStopping(monitor='val_loss', patience=10,
+                               restore_best_weights=True)
+            model.fit(X_tr_s, y_tr_s, epochs=50, batch_size=32,
+                      validation_data=(X_val_s, y_val_s),
+                      callbacks=[es], verbose=0)
+            val_pred = model.predict(X_val_s, verbose=0).ravel()
+            rmse = score_validation_rmse(y_val_s, val_pred)
+            results.append({'n_steps': n_steps, 'activation': act, 'units': units,
+                            'dropout': dr, 'learning_rate': lr, 'rmse': rmse})
+            if rmse < best_rmse:
+                best_rmse = rmse
+                best_params = {'n_steps': n_steps, 'activation': act,
+                               'units': units, 'dropout': dr, 'learning_rate': lr}
+        except Exception as e:
+            logger.warning("Error training LSTM-feat: %s", e)
+            continue
 
     logger.info("Best LSTM-feat parameters: %s with RMSE: %.4f", best_params, best_rmse)
     if results:
