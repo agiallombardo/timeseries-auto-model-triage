@@ -4,6 +4,12 @@ Used by main to apply .env overrides with precedence: code defaults <- .env <- C
 """
 import os
 
+# Default models when neither CLI nor .env set --models: ML and DL families only (no statistical).
+DEFAULT_MODELS = [
+    "rf", "svr", "xgb", "lr",
+    "rnn", "lstm", "mlp", "lstm_feat", "rnn_feat", "cnn1d",
+]
+
 
 def _env(key: str) -> str | None:
     v = os.environ.get(key)
@@ -64,7 +70,7 @@ def resolve_run_args(args, default_setup: dict) -> None:
         if m is not None:
             args.models = m
     if args.models is None:
-        args.models = ["all"]
+        args.models = list(DEFAULT_MODELS)
 
     if getattr(args, "losses", None) is None:
         l = get_env_list("LOSSES")

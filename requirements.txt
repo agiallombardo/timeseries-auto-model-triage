@@ -14,6 +14,8 @@ scikit-optimize>=0.9.0
 
 # Deep learning (TensorFlow 2.x bundles Keras)
 tensorflow>=2.8.0
+# Metal GPU plugin for Apple Silicon (installed by default on macOS)
+tensorflow-metal>=1.0.0; sys_platform == 'darwin'
 
 # Visualization
 seaborn>=0.11.2

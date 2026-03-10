@@ -1,4 +1,0 @@
-# Optional: Apple Silicon Mac GPU acceleration for TensorFlow/Keras
-# Install after base requirements: pip install -r requirements.txt
-# Then: pip install -r requirements-mac-gpu.txt
-tensorflow-metal>=1.0.0

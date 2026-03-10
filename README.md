@@ -5,109 +5,136 @@ This framework automatically tests and evaluates multiple forecasting models on 
 
 For the given time series data and the corresponding hyperparameter tuning results, the top 3 performing models will be selected by default.
 
-The framework is also extensible by defining your own models within the corresponding models or tuning .py   
-  
+The framework is also extensible by defining your own models within the corresponding `src/models` or `src/tuning` modules.
+
 ## Author
 Anthony Giallombardo & Assistant Claude
 
 ## Features
- - Supports 10 different forecasting models 
- - Automatic hyperparameter tuning for top-performing models 
- - Comprehensive visualization of results 
- - Detailed performance metrics and comparisons 
- - Dataset-specific result organization
+- **15 forecasting models** — statistical, ML, and deep learning
+- Automatic hyperparameter tuning for top-performing models
+- Comprehensive visualization of results
+- Detailed performance metrics and comparisons
+- Dataset-specific result organization
+- Optional GPU acceleration (Metal on Apple Silicon), .env config, and parallel runs
 
-## Sample Data
+## Requirements
+- **Python 3.9+**
+- CSV (or Excel) input with a **time/date column** and a **numeric column** to forecast
 
-**The package includes sample datasets in the data/samples directory:** \
-***Retail Sales Data*** - Daily retail sales with seasonal patterns, trends, and holiday effects \
-***Energy Consumption Data*** - Hourly energy usage with multiple seasonal patterns and temperature effects
+## Installation
+```bash
+git clone <repo-url>
+cd timeseries-auto-model-triage
+pip install -r requirements.txt
+```
 
-**You can generate these sample datasets using:** \
-`python data/samples/generate_retail_sales.py` \
-`python data/samples/generate_energy_consumption.py`
+On **macOS (Apple Silicon)**, `tensorflow-metal` is installed automatically for GPU-accelerated deep learning. Optional: `pip install -r requirements-mac-gpu.txt` if you installed base requirements on another OS and then run on a Mac.
 
-**Basic Usage** \
-Run the forecaster with default settings on the retail sales sample: \
-`python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales` 
+For **Jupyter** support: `pip install jupyter ipykernel` (or use the optional deps in `requirements.txt`).
 
-**This will**
-- Run all available forecasting models
-- Automatically tune the top 3 performing models
-- Generate visualizations and performance metrics
-- Save results in results/retail_sales_daily/
+## Input data
+- **Format:** CSV (or Excel). You must have one **time/date column** and one **numeric column** to forecast.
+- **Arguments:** `--file` (path), `--time_col` (name of date column), `--data_col` (name of value column). Optional: `--date_format` if parsing fails (e.g. `%Y-%m-%d`).
+- You can set `DATA_FILE`, `TIME_COL`, and `DATA_COL` in a `.env` file and then run `python main.py` with no arguments.
 
-## Example Scenarios
-**Forecasting Retail Sales** \
-`python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales` 
+## Sample data
+Sample datasets are in `data/samples/`:
+- **Retail sales** — daily, seasonal and holiday effects
+- **Energy consumption** — hourly, multiple seasonality
 
-For this dataset, machine learning models like Random Forest and XGBoost typically outperform statistical models because they can capture complex patterns, including seasonal effects and holiday periods. 
+Generate them:
+```bash
+python data/samples/generate_retail_sales.py
+python data/samples/generate_energy_consumption.py
+```
 
-**Forecasting Energy Consumption** \
-`python main.py --file data/samples/energy_consumption_hourly.csv --time_col timestamp --data_col energy_consumption` 
+## Basic usage
+Run all models on the retail sales sample:
+```bash
+python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales
+```
 
-This high-frequency data with multiple seasonality patterns (daily, weekly, yearly) benefits from models like LSTM and Prophet that can capture these complex temporal dependencies. 
+By default this runs **ML and DL models only** (10 models: rf, svr, xgb, lr, rnn, lstm, mlp, lstm_feat, rnn_feat, cnn1d), 3 variations each, tunes the top 3, and saves under `results/retail_sales_daily/`. Use `--models all` to include statistical models (arima, sarima, ma, es, prophet).
 
-**Forecasting with Selections**
+## Example scenarios
 
-***To test only specific models:*** \
-`python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales --models rf xgb prophet` 
+**Retail sales (daily):**
+```bash
+python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales
+```
+ML models (e.g. `rf`, `xgb`) often do well here due to seasonal and holiday effects.
 
-***Tune all models (can be time-consuming):*** \
-`python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales --tune_all` 
+**Energy consumption (hourly):**
+```bash
+python main.py --file data/samples/energy_consumption_hourly.csv --time_col timestamp --data_col energy_consumption
+```
+High-frequency data with multiple seasonality; LSTM and Prophet are often competitive.
 
-***Tune only the top 5 models (default is 3):*** \
-`python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales --tune_top 5` 
+**Run only selected models:** `--models rf xgb prophet mlp`  
+**Tune all models:** `--tune_all`  
+**Tune top 5 instead of 3:** `--tune_top 5`
 
-  
-## Understanding Results
 
-Each dataset's results are saved in a dedicated directory (results/{dataset_name}/):
-- all_models_trellis.png - Grid of plots showing each model's performance
-- top_3_models_comparison.png - Detailed comparison of the best models
-- model_performance.png - Bar charts comparing metrics across models
-- model_comparison_results.csv - Tabular performance metrics (one row per model, sorted by composite score)
-- model_configs.json - One config per model (best variation), same order as results
-- results_summary.json - Dataset, best_judgment, results (all models in order with metrics and params), optional best_per_run and tuned_best_params
+## Understanding results
+
+Results are written under `results/{dataset_name}/` (or `--output_dir`):
+
+| Output | Description |
+|--------|-------------|
+| `model_comparison_results.csv` | One row per model, sorted by composite score (RMSE, MAE, R², etc.). |
+| `model_configs.json` | Best variation config per model (hyperparameters, normalization, lags). |
+| `results_summary.json` | Dataset info, best-judgment text, full results, optional best_per_run and tuned params. |
+| `all_models_trellis.png` | Grid of forecasts for top 9 models (skipped with `--minimal-output` or `--no-charts`). |
+| `top_3_models_comparison.png` | Comparison of the top 3 models. |
+| `model_performance.png` | Bar charts of metrics. |
+| `model_radar.png` | Radar chart (skipped with `--minimal-output`). |
+| `top_3_residuals.png` | Residuals for top 3 (skipped with `--minimal-output`). |
+| `feature_importance.png` | Feature importance when available. |
 
 ## Supported Models
 
-***Statistical Models***
-- ARIMA (AutoRegressive Integrated Moving Average)
-- SARIMA (Seasonal ARIMA)
-- Moving Average
-- Exponential Smoothing
+Use the `--models` flag with the keys below (e.g. `--models rf xgb lstm`). **Default: ML and DL only** (10 models). Use `--models all` to run all 15 including statistical (arima, sarima, ma, es, prophet).
 
-***Machine Learning Models***
-- Random Forest
-- SVR (Support Vector Regression)
-- XGBoost
+| Key | Display name | Family |
+|-----|--------------|--------|
+| `arima` | ARIMA | Statistical |
+| `sarima` | SARIMA (Seasonal ARIMA) | Statistical |
+| `ma` | Moving Average | Statistical |
+| `es` | Exponential Smoothing | Statistical |
+| `prophet` | Prophet | Statistical |
+| `rf` | Random Forest | ML |
+| `svr` | SVR (Support Vector Regression) | ML |
+| `xgb` | XGBoost | ML |
+| `lr` | Linear Regression | ML |
+| `rnn` | RNN (Recurrent Neural Network) | DL |
+| `lstm` | LSTM (Long Short-Term Memory) | DL |
+| `mlp` | MLP (Multi-Layer Perceptron) | DL |
+| `lstm_feat` | LSTM-feat (LSTM on lag/features) | DL |
+| `rnn_feat` | RNN-feat (RNN on lag/features) | DL |
+| `cnn1d` | CNN-1D (1D Convolutional) | DL |
 
-***Deep Learning Models***
-- RNN (Recurrent Neural Network)
-- LSTM (Long Short-Term Memory)
+**Statistical:** ARIMA, SARIMA, Moving Average, Exponential Smoothing, Prophet — good baselines and for seasonal series.
 
-***Other Models***
-- Facebook Prophet
+**ML:** Random Forest, SVR, XGBoost, Linear Regression — support multiple loss functions (L1, L2, Huber, quantile) and lag-based features.
+
+**DL:** RNN, LSTM, MLP, LSTM-feat, RNN-feat, CNN-1D — TensorFlow/Keras; GPU-accelerated on Apple Silicon with `tensorflow-metal`.
 
 
 ## Performance and GPU (MacBook Pro)
 
-**Apple Silicon (M1/M2/M3/M4):** For faster deep learning training, install the optional Metal plugin so TensorFlow uses the GPU:
-
-```bash
-pip install tensorflow-metal
-```
-
-Or install from the project’s optional requirements (includes `tensorflow-metal`):
-
-```bash
-pip install -r requirements-mac-gpu.txt
-```
-
-TensorFlow will then use Metal for Keras models by default; no code changes are required.
+**Apple Silicon (M1/M2/M3/M4):** The Metal GPU plugin (`tensorflow-metal`) is included by default when you install requirements on macOS (`pip install -r requirements.txt`). TensorFlow will use Metal for Keras models automatically; no extra steps or code changes are required.
 
 **Intel Macs:** TensorFlow on macOS does not use the Intel iGPU for training. Use CPU or consider a cloud GPU for heavy DL workloads.
+
+**Troubleshooting: "Library not loaded: … _pywrap_tensorflow_internal.so" (Metal plugin)**  
+This usually means `tensorflow-metal` is incompatible with your TensorFlow version. To run without GPU and avoid the crash:
+
+```bash
+pip uninstall tensorflow-metal
+```
+
+Then reinstall a [tensorflow-metal version](https://pypi.org/project/tensorflow-metal/) that matches your TensorFlow version, or keep it uninstalled to use CPU-only for DL models. You can still run **ML-only** models without TensorFlow by using e.g. `--models rf svr xgb lr`.
 
 **TensorFlow threading (CPU or GPU):** You can tune how many threads TensorFlow uses for intra-op and inter-op parallelism via environment variables (e.g. before running `main.py`):
 
@@ -170,15 +197,18 @@ python main.py
 
 Or override for a single run: `python main.py --file other.csv --time_col ts --data_col value`.
 
-## Advanced Configuration
+## Advanced configuration
 
-Run a subset of models, control runs and tuning, or enable parallel model runs:
+| Flag | Description |
+|------|-------------|
+| `--models` | Models to run. Default: ML + DL only (`rf`, `svr`, `xgb`, `lr`, `rnn`, `lstm`, `mlp`, `lstm_feat`, `rnn_feat`, `cnn1d`). Use `all` to include statistical (`arima`, `sarima`, `ma`, `es`, `prophet`). |
+| `--n-runs` | Number of program runs to aggregate (default 3). Use `1` for faster iteration. |
+| `--tune_top` | Number of top models to tune (default 3). Use `0` to disable tuning. |
+| `--tune_all` | Tune every model (time-consuming). |
+| `--jobs` | Run up to N (model × variation) tasks in parallel (default 1). Use `2` on MacBook with Metal to reduce GPU contention. |
+| `--output_dir` | Directory for results (default `results`). |
+| `--minimal-output` | Skip trellis/radar/residuals; keep CSV, config, and main charts. |
+| `--no-charts` | Skip all chart generation. |
+| `--losses` | Restrict loss variants: `l1`, `l2`, `huber`, `quantile` (for models that support them). |
 
-- `--models rf xgb mlp` – run only these models.
-- `--n-runs 1` – single sweep (faster; default from config is 3).
-- `--tune_top 5` – tune top 5 models (default 3).
-- `--tune_all` – tune all models (time-consuming).
-- `--jobs 2` – run up to 2 (model × variation) tasks in parallel (default 1).
-- `--output_dir results` – where to save results.
-- `--minimal-output` – skip non-essential charts; keep CSV and config.
-- `--no-charts` – skip all chart generation.
+These can also be set in `.env` (e.g. `N_RUNS=1`, `MODELS=rf,xgb,mlp`, `JOBS=2`).

@@ -3,9 +3,12 @@ Centralized loss / objective mapping for every framework used in the pipeline.
 
 Each helper converts a canonical loss key ('l1', 'l2', 'huber', 'quantile')
 into the framework-specific argument expected by that model.
+
+TensorFlow is imported lazily in get_keras_loss() so that ML-only runs
+(e.g. default --models) do not load TF or the Metal plugin, avoiding
+load failures when tensorflow-metal is incompatible with the TF build.
 """
 
-import tensorflow as tf
 from sklearn.linear_model import LinearRegression, Lasso, HuberRegressor
 from sklearn.linear_model import QuantileRegressor
 
@@ -44,21 +47,22 @@ LOSS_SUPPORTED_MODELS = {
 
 # -- Keras ---------------------------------------------------------------------
 
-def _pinball_loss(quantile=0.5):
-    """Keras-compatible pinball (quantile) loss."""
+def _pinball_loss(quantile=0.5, tf_module=None):
+    """Keras-compatible pinball (quantile) loss. tf_module is required (lazy TF)."""
     def loss_fn(y_true, y_pred):
         err = y_true - y_pred
-        return tf.reduce_mean(tf.maximum(quantile * err, (quantile - 1) * err))
+        return tf_module.reduce_mean(tf_module.maximum(quantile * err, (quantile - 1) * err))
     loss_fn.__name__ = f'pinball_q{quantile}'
     return loss_fn
 
 
 def get_keras_loss(loss_key, quantile=0.5):
+    import tensorflow as tf  # lazy: only load TF when a DL model needs a loss
     mapping = {
         'l2':       'mse',
         'l1':       'mae',
         'huber':    tf.keras.losses.Huber(delta=1.0),
-        'quantile': _pinball_loss(quantile),
+        'quantile': _pinball_loss(quantile, tf_module=tf),
     }
     if loss_key not in mapping:
         raise ValueError(f"Unsupported Keras loss key: {loss_key}")
