@@ -138,22 +138,30 @@ def run_prophet_wrapper(y_train, y_test, **kwargs):
     pred = run_prophet(y_train, y_test, **kwargs)
     return pred, DISPLAY_NAMES['prophet']
 
-def run_rf_wrapper(y_train, y_test, X_train=None, X_test=None, loss='l2', **kwargs):
-    pred = run_random_forest(X_train, X_test, y_train, loss=loss)
-    return pred, _name_with_loss(DISPLAY_NAMES['rf'], loss)
+def run_rf_wrapper(y_train, y_test, X_train=None, X_test=None, loss='l2', n_estimators=100, **kwargs):
+    pred = run_random_forest(X_train, X_test, y_train, loss=loss, n_estimators=n_estimators)
+    name = _name_with_loss(DISPLAY_NAMES['rf'], loss)
+    if n_estimators != 100:
+        name = f"{name} (n={n_estimators})"
+    return pred, name
 
 def run_svr_wrapper(y_train, y_test, X_train=None, X_test=None, **kwargs):
     svr_kwargs = {k: v for k, v in kwargs.items() if k in ('C', 'kernel', 'gamma', 'epsilon')}
     pred, _ = run_svr(X_train, X_test, y_train, **svr_kwargs)
-    return pred, DISPLAY_NAMES['svr']
+    kernel = svr_kwargs.get('kernel', 'rbf')
+    C = svr_kwargs.get('C', 100)
+    return pred, f"{DISPLAY_NAMES['svr']} (C={C}, {kernel})"
 
 def run_xgb_wrapper(y_train, y_test, X_train=None, X_test=None, loss='l2', **kwargs):
     pred = run_xgboost(X_train, X_test, y_train, loss=loss)
     return pred, _name_with_loss(DISPLAY_NAMES['xgb'], loss)
 
-def run_lr_wrapper(y_train, y_test, X_train=None, X_test=None, loss='l2', **kwargs):
-    pred = run_linear_regression(X_train, X_test, y_train, loss=loss)
-    return pred, _name_with_loss(DISPLAY_NAMES['lr'], loss)
+def run_lr_wrapper(y_train, y_test, X_train=None, X_test=None, loss='l2', alpha=None, **kwargs):
+    pred = run_linear_regression(X_train, X_test, y_train, loss=loss, alpha=alpha)
+    name = _name_with_loss(DISPLAY_NAMES['lr'], loss)
+    if alpha is not None:
+        name = f"{name} (α={alpha})"
+    return pred, name
 
 def run_rnn_wrapper(y_train, y_test, n_steps=3, loss='l2', **kwargs):
     pred, _ = run_rnn(y_train, y_test, n_steps=n_steps, loss=loss, **kwargs)
@@ -163,20 +171,34 @@ def run_lstm_wrapper(y_train, y_test, n_steps=3, loss='l2', **kwargs):
     pred, _ = run_lstm(y_train, y_test, n_steps=n_steps, loss=loss, **kwargs)
     return pred, _name_with_loss(DISPLAY_NAMES['lstm'], loss)
 
-def run_mlp_wrapper(y_train, y_test, X_train=None, X_test=None, loss='l2', **kwargs):
-    pred = run_mlp(X_train, X_test, y_train, loss=loss)
+def run_mlp_wrapper(y_train, y_test, X_train=None, X_test=None, loss='l2',
+                    scaler='standard', feature_range=(0, 1),
+                    activation='relu', learning_rate=0.001, **kwargs):
+    pred = run_mlp(X_train, X_test, y_train, loss=loss, scaler=scaler,
+                   feature_range=feature_range, activation=activation, learning_rate=learning_rate)
     return pred, _name_with_loss(DISPLAY_NAMES['mlp'], loss)
 
-def run_lstm_feat_wrapper(y_train, y_test, X_train=None, X_test=None, n_steps=5, loss='l2', **kwargs):
-    pred = run_lstm_features(X_train, X_test, y_train, y_test, n_steps=n_steps, loss=loss)
+def run_lstm_feat_wrapper(y_train, y_test, X_train=None, X_test=None, n_steps=5, loss='l2',
+                          scaler='standard', feature_range=(0, 1),
+                          activation='relu', learning_rate=0.001, **kwargs):
+    pred = run_lstm_features(X_train, X_test, y_train, y_test, n_steps=n_steps, loss=loss,
+                             scaler=scaler, feature_range=feature_range,
+                             activation=activation, learning_rate=learning_rate)
     return pred, _name_with_loss(DISPLAY_NAMES['lstm_feat'], loss)
 
-def run_rnn_feat_wrapper(y_train, y_test, X_train=None, X_test=None, n_steps=5, loss='l2', **kwargs):
-    pred = run_rnn_features(X_train, X_test, y_train, y_test, n_steps=n_steps, loss=loss)
+def run_rnn_feat_wrapper(y_train, y_test, X_train=None, X_test=None, n_steps=5, loss='l2',
+                         scaler='standard', feature_range=(0, 1),
+                         activation='relu', learning_rate=0.001, **kwargs):
+    pred = run_rnn_features(X_train, X_test, y_train, y_test, n_steps=n_steps, loss=loss,
+                            scaler=scaler, feature_range=feature_range,
+                            activation=activation, learning_rate=learning_rate)
     return pred, _name_with_loss(DISPLAY_NAMES['rnn_feat'], loss)
 
-def run_cnn1d_wrapper(y_train, y_test, X_train=None, X_test=None, n_steps=5, loss='l2', **kwargs):
-    pred = run_cnn1d(X_train, X_test, y_train, y_test, n_steps=n_steps, loss=loss)
+def run_cnn1d_wrapper(y_train, y_test, X_train=None, X_test=None, n_steps=5, loss='l2',
+                      scaler='standard', feature_range=(0, 1),
+                      learning_rate=0.001, **kwargs):
+    pred = run_cnn1d(X_train, X_test, y_train, y_test, n_steps=n_steps, loss=loss,
+                     scaler=scaler, feature_range=feature_range, learning_rate=learning_rate)
     return pred, _name_with_loss(DISPLAY_NAMES['cnn1d'], loss)
 
 
@@ -230,18 +252,26 @@ def tune_lstm_wrapper(y_train, y_test, n_steps=3, loss='l2', **kwargs):
     best_params, pred, _ = grid_search_lstm(y_train, y_test, loss=loss)
     return pred, _name_with_loss(DISPLAY_NAMES['lstm'], loss) + " (Tuned)", best_params
 
-def tune_mlp_wrapper(y_train, y_test, X_train=None, X_test=None, loss='l2', **kwargs):
-    best_params, pred = grid_search_mlp(X_train, X_test, y_train, y_test, loss=loss)
+def tune_mlp_wrapper(y_train, y_test, X_train=None, X_test=None, loss='l2',
+                     scaler='standard', feature_range=(0, 1), **kwargs):
+    best_params, pred = grid_search_mlp(X_train, X_test, y_train, y_test, loss=loss,
+                                        scaler=scaler, feature_range=feature_range)
     return pred, _name_with_loss(DISPLAY_NAMES['mlp'], loss) + " (Tuned)", best_params
 
-def tune_lstm_feat_wrapper(y_train, y_test, X_train=None, X_test=None, n_steps=5, loss='l2', **kwargs):
-    best_params, pred = grid_search_lstm_features(X_train, X_test, y_train, y_test, loss=loss)
+def tune_lstm_feat_wrapper(y_train, y_test, X_train=None, X_test=None, n_steps=5, loss='l2',
+                           scaler='standard', feature_range=(0, 1), **kwargs):
+    best_params, pred = grid_search_lstm_features(X_train, X_test, y_train, y_test, loss=loss,
+                                                  scaler=scaler, feature_range=feature_range)
     return pred, _name_with_loss(DISPLAY_NAMES['lstm_feat'], loss) + " (Tuned)", best_params
 
-def tune_rnn_feat_wrapper(y_train, y_test, X_train=None, X_test=None, n_steps=5, loss='l2', **kwargs):
-    best_params, pred = grid_search_rnn_features(X_train, X_test, y_train, y_test, loss=loss)
+def tune_rnn_feat_wrapper(y_train, y_test, X_train=None, X_test=None, n_steps=5, loss='l2',
+                          scaler='standard', feature_range=(0, 1), **kwargs):
+    best_params, pred = grid_search_rnn_features(X_train, X_test, y_train, y_test, loss=loss,
+                                                 scaler=scaler, feature_range=feature_range)
     return pred, _name_with_loss(DISPLAY_NAMES['rnn_feat'], loss) + " (Tuned)", best_params
 
-def tune_cnn1d_wrapper(y_train, y_test, X_train=None, X_test=None, n_steps=5, loss='l2', **kwargs):
-    best_params, pred = grid_search_cnn1d(X_train, X_test, y_train, y_test, loss=loss)
+def tune_cnn1d_wrapper(y_train, y_test, X_train=None, X_test=None, n_steps=5, loss='l2',
+                       scaler='standard', feature_range=(0, 1), **kwargs):
+    best_params, pred = grid_search_cnn1d(X_train, X_test, y_train, y_test, loss=loss,
+                                          scaler=scaler, feature_range=feature_range)
     return pred, _name_with_loss(DISPLAY_NAMES['cnn1d'], loss) + " (Tuned)", best_params

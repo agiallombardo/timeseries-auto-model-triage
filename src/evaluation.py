@@ -164,7 +164,7 @@ def compute_best_judgment(results_df):
     r2 = best_row['r2']
     composite = best_row['composite_score']
 
-    parts = [f"Recommended model: {name} (composite score: {composite:.3f})."]
+    parts = [f"Recommended model: {name} (composite score: {composite:.4f})."]
     parts.append(f"It achieves best overall balance across RMSE, MAE, R², MASE, and MAPE.")
     if r2 >= 0.7:
         parts.append("Strong explanatory power (R² ≥ 0.7).")
@@ -348,7 +348,6 @@ def create_top_models_plot(y_train, y_test, predictions, model_names, save_path=
     ax.grid(True, alpha=0.3)
 
     # Inset: zoom on middle of test period with readable date ticks
-    from mpl_toolkits.axes_grid1.inset_locator import zoomed_inset_axes, mark_inset
     mid = len(y_test) // 2
     half = len(y_test) // 4
     axins = zoomed_inset_axes(ax, 2.5, loc='upper right')

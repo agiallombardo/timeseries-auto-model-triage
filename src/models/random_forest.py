@@ -6,12 +6,12 @@ from ..losses import get_rf_criterion
 logger = logging.getLogger(__name__)
 
 
-def run_random_forest(X_train, X_test, y_train, loss='l2'):
+def run_random_forest(X_train, X_test, y_train, loss='l2', n_estimators=100, **kwargs):
     """Run Random Forest model."""
-    logger.info(f"Training Random Forest ({loss.upper()}) model...")
+    logger.info(f"Training Random Forest ({loss.upper()}, n_estimators={n_estimators}) model...")
     criterion = get_rf_criterion(loss)
     model = RandomForestRegressor(
-        n_estimators=100,
+        n_estimators=n_estimators,
         max_depth=10,
         criterion=criterion,
         random_state=42,

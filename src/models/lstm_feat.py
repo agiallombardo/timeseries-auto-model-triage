@@ -3,33 +3,36 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Input, LSTM
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping
-from sklearn.preprocessing import StandardScaler
 
 from ._dl_utils import prepare_feature_sequences
 from ..losses import get_keras_loss
+from ..preprocessing import get_scaler
 
 logger = logging.getLogger(__name__)
 
 
-def run_lstm_features(X_train, X_test, y_train, y_test, n_steps=5, loss='l2'):
+def run_lstm_features(X_train, X_test, y_train, y_test, n_steps=5, loss='l2',
+                      scaler='standard', feature_range=(0, 1),
+                      activation='relu', learning_rate=0.001, **kwargs):
     """Many-to-one LSTM on feature matrices; one forward pass per test sample."""
-    logger.info(f"Training LSTM-feat ({loss.upper()}) model...")
+    logger.info(f"Training LSTM-feat ({loss.upper()}, scaler={scaler}, act={activation}) model...")
     X_tr_seq, X_te_seq, y_tr_seq, _ = prepare_feature_sequences(
         X_train, X_test, y_train, y_test, n_steps
     )
     n_features = X_tr_seq.shape[2]
 
-    scaler = StandardScaler()
-    scaler.fit(X_tr_seq.reshape(-1, n_features))
-    X_tr_seq = scaler.transform(X_tr_seq.reshape(-1, n_features)).reshape(X_tr_seq.shape)
-    X_te_seq = scaler.transform(X_te_seq.reshape(-1, n_features)).reshape(X_te_seq.shape)
+    scaler_obj = get_scaler(scaler, feature_range=feature_range)
+    if scaler_obj is not None:
+        scaler_obj.fit(X_tr_seq.reshape(-1, n_features))
+        X_tr_seq = scaler_obj.transform(X_tr_seq.reshape(-1, n_features)).reshape(X_tr_seq.shape)
+        X_te_seq = scaler_obj.transform(X_te_seq.reshape(-1, n_features)).reshape(X_te_seq.shape)
 
     model = Sequential([
         Input(shape=(n_steps, n_features)),
-        LSTM(64, activation='relu'),
+        LSTM(64, activation=activation),
         Dense(1),
     ])
-    model.compile(optimizer=Adam(learning_rate=0.001), loss=get_keras_loss(loss))
+    model.compile(optimizer=Adam(learning_rate=learning_rate), loss=get_keras_loss(loss))
     early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
     model.fit(
         X_tr_seq, y_tr_seq,

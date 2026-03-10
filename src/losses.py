@@ -97,12 +97,18 @@ def get_rf_criterion(loss_key):
 
 # -- Linear Regression ---------------------------------------------------------
 
-def get_linear_model(loss_key, quantile=0.5):
-    """Return an unfitted sklearn estimator matching the requested loss."""
+def get_linear_model(loss_key, quantile=0.5, alpha=None):
+    """Return an unfitted sklearn estimator matching the requested loss.
+
+    alpha : float or None
+        Regularization strength for Lasso (l1). When None the default 0.01 is used.
+        Has no effect for l2, huber, or quantile.
+    """
     if loss_key == 'l2':
         return LinearRegression()
     if loss_key == 'l1':
-        return Lasso(alpha=0.01, max_iter=10000)
+        _alpha = alpha if alpha is not None else 0.01
+        return Lasso(alpha=_alpha, max_iter=10000)
     if loss_key == 'huber':
         return HuberRegressor(max_iter=2000)
     if loss_key == 'quantile':

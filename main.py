@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import os
+import re
 import json
 import logging
 import traceback
@@ -28,7 +29,7 @@ from src.model_config import (
 # Results reporting: column order and numeric format (same for CSV, console, and summary)
 REPORT_COLUMNS = ['model', 'composite_score', 'rmse', 'mae', 'r2', 'mase', 'mape']
 REPORT_FORMAT = {
-    'composite_score': '{:.3f}',
+    'composite_score': '{:.4f}',
     'rmse': '{:.4f}',
     'mae': '{:.4f}',
     'r2': '{:.4f}',
@@ -78,7 +79,7 @@ def _print_results_report(results_df_agg, top_models_df, judgment_text):
     # Top 3
     print("\nTop 3 models:")
     for i, (_, row) in enumerate(top_models_df.iterrows(), 1):
-        parts = [f"{i}. {row['model']}", f"composite={row['composite_score']:.3f}", f"RMSE={row['rmse']:.4f}", f"MAE={row['mae']:.4f}", f"R²={row['r2']:.4f}"]
+        parts = [f"{i}. {row['model']}", f"composite={row['composite_score']:.4f}", f"RMSE={row['rmse']:.4f}", f"MAE={row['mae']:.4f}", f"R²={row['r2']:.4f}"]
         if 'mase' in row and pd.notna(row.get('mase')) and not np.isinf(row.get('mase', 0)):
             parts.append(f"MASE={row['mase']:.3f}")
         if 'mape' in row and pd.notna(row.get('mape')) and not np.isinf(row.get('mape', 0)):
@@ -87,17 +88,34 @@ def _print_results_report(results_df_agg, top_models_df, judgment_text):
 
 
 def _parse_display_name(display_name):
-    """Parse 'XGBoost (L2)' -> ('xgb', 'l2'), 'ARIMA' -> ('arima', None)."""
-    parts = display_name.split(" (")
-    base = parts[0].strip()
-    first_word = base.lower().split()[0]
+    """Parse display name back to (model_key, loss_key|None).
+
+    Handles all display name formats:
+      'XGBoost (L2)'                       -> ('xgb', 'l2')
+      'ARIMA(1, 0, 0)'                     -> ('arima', None)
+      'SARIMA[1,1,0]x[0,1,1,12] (Tuned)'  -> ('sarima', None)
+      'SVR (C=1.0, rbf)'                   -> ('svr', None)
+      'Random Forest (L2) (n=200)'         -> ('rf', 'l2')
+      'Linear Regression (L1) (α=0.1)'     -> ('lr', 'l1')
+      'CNN-1D (Huber)'                     -> ('cnn1d', 'huber')
+    """
+    loss_map = {'l1': 'l1', 'l2': 'l2', 'huber': 'huber', 'quantile': 'quantile'}
+
+    # Isolate model base name by removing order/args that appear as inline (digits) or [list] right after
+    base = re.sub(r'\([\d, ]+\).*$', '', display_name).strip()  # ARIMA(1,0,0)... → ARIMA
+    base = re.sub(r'\[.*$', '', base).strip()                    # SARIMA[...]... → SARIMA
+    base = base.split(' (')[0].strip()                           # strip loss/suffix like " (L2)"
+
+    first_word = base.lower().split()[0] if base else display_name.lower().split()[0]
     model_key = DISPLAY_NAME_TO_REGISTRY_KEY.get(first_word, first_word)
-    if len(parts) > 1:
-        loss_suffix = parts[1].rstrip(")").strip().lower()
-        loss_map = {'l1': 'l1', 'l2': 'l2', 'huber': 'huber', 'quantile': 'quantile'}
-        loss = loss_map.get(loss_suffix, loss_suffix)
-    else:
-        loss = None
+
+    # Scan parenthesised segments for a recognised loss key
+    loss = None
+    for segment in display_name.split('(')[1:]:
+        candidate = segment.strip().rstrip(')').strip().lower()
+        if candidate in loss_map:
+            loss = loss_map[candidate]
+            break
     return model_key, loss
 
 
@@ -139,12 +157,14 @@ def _build_run_config(
     display_name, tuned, hyperparameters, metadata, n_train, n_test,
 ):
     """Build a single run config dict for model_configs.json."""
+    effective_lags = variation_spec.get("lags", default_setup["lags"]) if variation_spec else default_setup["lags"]
     setup = {
         "data_file": args.file,
         "time_column": args.time_col,
         "data_column": args.data_col,
         "test_size": default_setup["test_size"],
-        "lags": default_setup["lags"],
+        "lags": effective_lags,
+        "lags_built": default_setup["lags"],
         "rolling_window": default_setup["rolling_window"],
         "ma_window": default_setup["ma_window"],
         "n_runs": default_setup.get("n_runs", 3),
@@ -158,7 +178,7 @@ def _build_run_config(
         if n_steps is None:
             n_steps = metadata.get("default_n_steps")
         time_steps = {"n_steps": n_steps}
-    normalization = build_normalization_entry(metadata) if metadata else {"type": "none", "scope": None, "description": None}
+    normalization = build_normalization_entry(metadata, hyperparameters)
     shape_and_reshaping = (metadata.get("shape_and_reshaping") if metadata else None) or None
     config = {
         "model_key": model_key,
@@ -224,7 +244,7 @@ def main():
     logger.info(f"Data column: {args.data_col}")
 
     default_setup = get_default_setup()
-    logger.info(f"Setup: test_size={default_setup['test_size']}, lags={default_setup['lags']}, n_steps={default_setup.get('n_steps_univariate')}, ma_window={default_setup['ma_window']} (3 variations per model)")
+    logger.info(f"Setup: test_size={default_setup['test_size']}, lags_options={default_setup.get('lags_options')} (built with max={default_setup['lags']}, subsetted per variation), n_steps={default_setup.get('n_steps_univariate')}, ma_window={default_setup['ma_window']} (3 variations per model)")
 
     # Load and prepare data (use default setup, not CLI)
     try:
@@ -354,7 +374,10 @@ def _run_models_impl(args, default_setup, available_models, tuning_functions, X_
                 try:
                     loss_key = variation_spec.get("loss")
                     logger.info(f"Tuning {model_key.upper()}" + (f" ({loss_key.upper()})" if loss_key else "") + " ...")
-                    model_params = _base_params(default_setup, model_key, y_train, y_test, X_train, X_test, seasonal_periods)
+                    var_lags = variation_spec.get("lags")
+                    var_X_train = _subset_lag_features(X_train, var_lags) if var_lags else X_train
+                    var_X_test = _subset_lag_features(X_test, var_lags) if var_lags else X_test
+                    model_params = _base_params(default_setup, model_key, y_train, y_test, var_X_train, var_X_test, seasonal_periods)
                     model_params.update(variation_spec)
                     pred, name, best_params = execute_tuning(model_key, tuning_functions, model_params)
                     all_predictions.append(pred)
@@ -391,7 +414,10 @@ def _run_models_impl(args, default_setup, available_models, tuning_functions, X_
             default_hp = dict(metadata.get("default_hyperparameters", {})) if metadata else {}
             for variation_index, variation_spec in enumerate(variations):
                 try:
-                    model_params = _base_params(default_setup, model_key, y_train, y_test, X_train, X_test, seasonal_periods)
+                    var_lags = variation_spec.get("lags")
+                    var_X_train = _subset_lag_features(X_train, var_lags) if var_lags else X_train
+                    var_X_test = _subset_lag_features(X_test, var_lags) if var_lags else X_test
+                    model_params = _base_params(default_setup, model_key, y_train, y_test, var_X_train, var_X_test, seasonal_periods)
                     model_params.update(variation_spec)
                     loss_key = variation_spec.get("loss")
                     logger.info(
@@ -423,14 +449,14 @@ def _run_models_impl(args, default_setup, available_models, tuning_functions, X_
             best_per_run.append({
                 "run": run_idx + 1,
                 "best_model": best_row["model"],
-                "composite_score": float(best_row["composite_score"]),
+                "composite_score": round(float(best_row["composite_score"]), 4),
                 "rmse": float(best_row["rmse"]),
                 "mae": float(best_row["mae"]),
                 "r2": float(best_row["r2"]),
                 "variation_spec": cfg.get("variation_spec", {}),
                 "hyperparameters": cfg.get("hyperparameters", {}),
             })
-            logger.info(f"Run {run_idx + 1} best: {best_row['model']} (composite={best_row['composite_score']:.3f})")
+            logger.info(f"Run {run_idx + 1} best: {best_row['model']} (composite={best_row['composite_score']:.4f})")
 
     # Aggregate across program runs: mean metrics and mean predictions per model; rerank by mean metrics
     n_models = len(first_run_names)
@@ -445,6 +471,24 @@ def _run_models_impl(args, default_setup, available_models, tuning_functions, X_
         results.append(_aggregate_run_results(result_dicts, name))
 
     return all_predictions, model_names, results, run_configs, best_per_run
+
+
+def _subset_lag_features(X, lags: int):
+    """Return feature matrix keeping only lag_1..lag_{lags} plus all non-lag columns.
+
+    Features are built with max lags to keep y_train/y_test aligned across variations.
+    Each variation that requests fewer lags gets a smaller but aligned feature matrix.
+    """
+    if X is None:
+        return X
+    lag_cols = sorted(
+        [c for c in X.columns if c.startswith("lag_") and c.split("_")[1].isdigit()
+         and int(c.split("_")[1]) <= lags],
+        key=lambda c: int(c.split("_")[1]),
+    )
+    non_lag_cols = [c for c in X.columns
+                    if not (c.startswith("lag_") and c.split("_")[1].isdigit())]
+    return X[non_lag_cols + lag_cols]
 
 
 def _base_params(default_setup, model_key, y_train, y_test, X_train, X_test, seasonal_periods):
@@ -541,26 +585,12 @@ def process_results(args, default_setup, all_predictions, model_names, results, 
     # Best model = highest median composite (one row per model)
     best_row = results_df_agg.iloc[0]
     best_model_name = best_row['model']
-    best_model_key = best_model_name.lower().split()[0]
-    judgment_text = f"Recommended model: {best_model_name} (median composite score: {best_row['composite_score']:.3f}). Best balance across RMSE, MAE, R², MASE, and MAPE among the tested models."
+    judgment_text = f"Recommended model: {best_model_name} (median composite score: {best_row['composite_score']:.4f}). Best balance across RMSE, MAE, R², MASE, and MAPE among the tested models."
 
-    logger.info(f"Best model: {best_model_name} (composite={best_row['composite_score']:.3f}, RMSE={best_row['rmse']:.4f})")
+    logger.info(f"Best model: {best_model_name} (composite={best_row['composite_score']:.4f}, RMSE={best_row['rmse']:.4f})")
 
-    # Save top models information
-    top_models_info = {}
-    
-    # Add dataset information
     dataset_name = os.path.basename(args.file).split(".")[0]
-    top_models_info["dataset"] = {
-        "name": dataset_name,
-        'file': args.file,
-        'time_column': args.time_col,
-        'data_column': args.data_col,
-        'total_samples': len(y_train) + len(y_test),
-        'training_samples': len(y_train),
-        'testing_samples': len(y_test)
-    }
-    
+
     # Single results summary JSON: dataset, best_judgment, results (test metrics = final evaluation only)
     results_list = []
     for _, row in results_df_agg.iterrows():
@@ -568,7 +598,7 @@ def process_results(args, default_setup, all_predictions, model_names, results, 
         cfg = run_configs[best_idx] if best_idx < len(run_configs) else {}
         entry = {
             'model': row['model'],
-            'composite_score': float(row['composite_score']),
+            'composite_score': round(float(row['composite_score']), 4),
             'rmse': float(row['rmse']),
             'mae': float(row['mae']),
             'r2': float(row['r2']),
@@ -583,7 +613,15 @@ def process_results(args, default_setup, all_predictions, model_names, results, 
         results_list.append(entry)
 
     results_summary = {
-        "dataset": top_models_info["dataset"],
+        "dataset": {
+            "name": dataset_name,
+            "file": args.file,
+            "time_column": args.time_col,
+            "data_column": args.data_col,
+            "total_samples": len(y_train) + len(y_test),
+            "training_samples": len(y_train),
+            "testing_samples": len(y_test),
+        },
         "best_judgment": judgment_text,
         "results": results_list,
     }
@@ -648,13 +686,17 @@ def tune_selected_models(args, default_setup, models_to_tune, tuning_functions,
     return tuned_predictions, tuned_names, tuned_results, all_tuned_params
 
 def determine_seasonal_periods(y_train):
-    """Determine appropriate seasonal periods based on data frequency."""
-    if len(y_train) > 12 * 2:  # At least 2 years of monthly data
-        return 12
-    elif len(y_train) > 52 * 2:  # At least 2 years of weekly data
+    """Determine appropriate seasonal periods based on training series length.
+
+    Ordered largest-to-smallest so each branch is reachable:
+    weekly (104+) → quarterly (24+) → quarterly default.
+    """
+    n = len(y_train)
+    if n > 52 * 2:   # 104+ points → assume weekly or higher frequency
         return 52
-    else:
-        return 4  # Default to quarterly
+    if n > 12 * 2:   # 25-104 points → assume monthly
+        return 12
+    return 4          # shorter series → quarterly
 
 # Helper functions for model execution
 def execute_model(model_key, available_models, params):

@@ -14,7 +14,7 @@ Variation axes (settings tested to find best output):
 # Option lists define the 3 possibilities tested to find the best (see VARIATIONS_PER_MODEL).
 DEFAULT_SETUP = {
     "test_size": 0.2,
-    "lags": 5,                          # middle of 3 tested; options [3, 5, 7] for ML feature lags
+    "lags": 7,                          # max of 3 tested; build features with max lags, subset per variation
     "lags_options": [3, 5, 7],
     "rolling_window": 3,
     "n_steps_univariate": 5,            # middle of 3 tested; options [3, 5, 10] for RNN/LSTM
@@ -56,59 +56,59 @@ VARIATIONS_PER_MODEL = {
         {"trend": "mul", "seasonal": "mul"},
     ],
     "prophet": [
-        {"changepoint_prior_scale": 0.01, "seasonality_prior_scale": 0.1},
-        {"changepoint_prior_scale": 0.1, "seasonality_prior_scale": 1.0},
-        {"changepoint_prior_scale": 0.5, "seasonality_prior_scale": 10.0},
+        {"changepoint_prior_scale": 0.01, "seasonality_prior_scale": 0.1, "seasonality_mode": "additive"},
+        {"changepoint_prior_scale": 0.1, "seasonality_prior_scale": 1.0, "seasonality_mode": "multiplicative"},
+        {"changepoint_prior_scale": 0.5, "seasonality_prior_scale": 10.0, "seasonality_mode": "additive"},
     ],
     "rf": [
-        {"loss": "l2"},
-        {"loss": "l1"},
-        {"loss": "l2"},  # only 2 losses; third variation repeats l2
+        {"loss": "l2", "lags": 3},
+        {"loss": "l1", "lags": 5},
+        {"loss": "l2", "n_estimators": 200, "lags": 7},
     ],
     "svr": [
-        {"C": 1.0, "kernel": "rbf"},
-        {"C": 10.0, "kernel": "rbf"},
-        {"C": 100.0, "kernel": "rbf"},
+        {"C": 1.0, "kernel": "rbf", "lags": 3},
+        {"C": 10.0, "kernel": "rbf", "lags": 5},
+        {"C": 10.0, "kernel": "linear", "lags": 7},
     ],
     "xgb": [
-        {"loss": "l2"},
-        {"loss": "l1"},
-        {"loss": "huber"},
+        {"loss": "l2", "lags": 3},
+        {"loss": "l1", "lags": 5},
+        {"loss": "huber", "lags": 7},
     ],
     "lr": [
-        {"loss": "l2"},
-        {"loss": "l1"},
-        {"loss": "huber"},
+        {"loss": "l2", "lags": 3},
+        {"loss": "l1", "alpha": 0.1, "lags": 5},
+        {"loss": "huber", "lags": 7},
     ],
     "rnn": [
-        {"loss": "l2", "n_steps": 3, "scaler": "standard"},
-        {"loss": "l2", "n_steps": 5, "scaler": "minmax", "feature_range": [0, 1]},
-        {"loss": "l2", "n_steps": 10, "units": 64, "scaler": "standard"},
+        {"loss": "l2", "n_steps": 3, "scaler": "standard", "activation": "relu"},
+        {"loss": "l1", "n_steps": 5, "scaler": "minmax", "feature_range": [0, 1], "activation": "relu"},
+        {"loss": "huber", "n_steps": 10, "units": 64, "scaler": "robust", "activation": "tanh"},
     ],
     "lstm": [
-        {"loss": "l2", "n_steps": 3, "scaler": "standard"},
-        {"loss": "l2", "n_steps": 5, "scaler": "minmax", "feature_range": [0, 1]},
-        {"loss": "l2", "n_steps": 10, "units": 64, "dropout_rate": 0.2, "scaler": "standard"},
+        {"loss": "l2", "n_steps": 3, "scaler": "standard", "activation": "relu"},
+        {"loss": "l1", "n_steps": 5, "scaler": "minmax", "feature_range": [0, 1], "activation": "relu"},
+        {"loss": "huber", "n_steps": 10, "units": 64, "dropout_rate": 0.2, "scaler": "robust", "activation": "tanh"},
     ],
     "mlp": [
-        {"loss": "l2"},
-        {"loss": "l1"},
-        {"loss": "huber"},
+        {"loss": "l2", "scaler": "standard", "lags": 3, "activation": "relu", "learning_rate": 0.001},
+        {"loss": "l1", "scaler": "minmax", "lags": 5, "activation": "relu", "learning_rate": 0.001},
+        {"loss": "huber", "scaler": "robust", "lags": 7, "activation": "tanh", "learning_rate": 0.01},
     ],
     "lstm_feat": [
-        {"loss": "l2", "n_steps": 3},
-        {"loss": "l2", "n_steps": 5},
-        {"loss": "l2", "n_steps": 7},
+        {"loss": "l2", "n_steps": 3, "scaler": "standard", "lags": 3, "activation": "relu", "learning_rate": 0.001},
+        {"loss": "l1", "n_steps": 5, "scaler": "minmax", "lags": 5, "activation": "relu", "learning_rate": 0.001},
+        {"loss": "huber", "n_steps": 7, "scaler": "robust", "lags": 7, "activation": "tanh", "learning_rate": 0.01},
     ],
     "rnn_feat": [
-        {"loss": "l2", "n_steps": 3},
-        {"loss": "l2", "n_steps": 5},
-        {"loss": "l2", "n_steps": 7},
+        {"loss": "l2", "n_steps": 3, "scaler": "standard", "lags": 3, "activation": "relu", "learning_rate": 0.001},
+        {"loss": "l1", "n_steps": 5, "scaler": "minmax", "lags": 5, "activation": "relu", "learning_rate": 0.001},
+        {"loss": "huber", "n_steps": 7, "scaler": "robust", "lags": 7, "activation": "tanh", "learning_rate": 0.01},
     ],
     "cnn1d": [
-        {"loss": "l2", "n_steps": 3},
-        {"loss": "l2", "n_steps": 5},
-        {"loss": "l2", "n_steps": 7},
+        {"loss": "l2", "n_steps": 3, "scaler": "standard", "lags": 3, "learning_rate": 0.001},
+        {"loss": "l1", "n_steps": 5, "scaler": "minmax", "lags": 5, "learning_rate": 0.001},
+        {"loss": "huber", "n_steps": 7, "scaler": "robust", "lags": 7, "learning_rate": 0.01},
     ],
 }
 
@@ -197,7 +197,7 @@ MODEL_METADATA = {
     },
     "rnn": {
         "scaling": "target",
-        "scaling_description": "StandardScaler on target; fit on train reshape (-1,1); inverse on predictions",
+        "scaling_description": "Scaler (standard/minmax/robust) on target series; fit on train reshape (-1,1); inverse on predictions",
         "input_type": "univariate_sequence",
         "uses_n_steps": True,
         "default_n_steps": 3,
@@ -206,11 +206,12 @@ MODEL_METADATA = {
             "sequence_builder": "prepare_sequence_data",
             "reshape": "(samples, n_steps, 1)",
         },
-        "default_hyperparameters": {"n_steps": 3, "units": 50, "learning_rate": 0.001, "scaler": "standard"},
+        "default_hyperparameters": {"n_steps": 3, "units": 50, "learning_rate": 0.001,
+                                    "activation": "relu", "scaler": "standard"},
     },
     "lstm": {
         "scaling": "target",
-        "scaling_description": "StandardScaler on target; fit on train reshape (-1,1); inverse on predictions",
+        "scaling_description": "Scaler (standard/minmax/robust) on target series; fit on train reshape (-1,1); inverse on predictions",
         "input_type": "univariate_sequence",
         "uses_n_steps": True,
         "default_n_steps": 3,
@@ -219,20 +220,21 @@ MODEL_METADATA = {
             "sequence_builder": "prepare_sequence_data",
             "reshape": "(samples, n_steps, 1)",
         },
-        "default_hyperparameters": {"n_steps": 3, "units": 50, "layers": 1, "dropout_rate": 0.0, "learning_rate": 0.001, "scaler": "standard"},
+        "default_hyperparameters": {"n_steps": 3, "units": 50, "layers": 1, "dropout_rate": 0.0,
+                                    "learning_rate": 0.001, "activation": "relu", "scaler": "standard"},
     },
     "mlp": {
-        "scaling": "X_and_y",
-        "scaling_description": "StandardScaler on X and y; fit on train",
+        "scaling": "X",
+        "scaling_description": "Scaler (standard/minmax/robust) on X; fit on train only",
         "input_type": "tabular",
         "uses_n_steps": False,
         "default_n_steps": None,
         "shape_and_reshaping": None,
-        "default_hyperparameters": {"loss": "l2"},
+        "default_hyperparameters": {"loss": "l2", "activation": "relu", "learning_rate": 0.001},
     },
     "lstm_feat": {
         "scaling": "features",
-        "scaling_description": "StandardScaler on sequence features; reshape (-1, n_features) fit/transform then reshape back to (samples, n_steps, n_features)",
+        "scaling_description": "Scaler (standard/minmax/robust) on sequence features; reshape (-1, n_features) fit/transform then reshape back to (samples, n_steps, n_features)",
         "input_type": "feature_sequence",
         "uses_n_steps": True,
         "default_n_steps": 5,
@@ -241,11 +243,12 @@ MODEL_METADATA = {
             "sequence_builder": "prepare_feature_sequences",
             "reshape": "(samples, n_steps, n_features)",
         },
-        "default_hyperparameters": {"n_steps": 5, "units": 64, "loss": "l2"},
+        "default_hyperparameters": {"n_steps": 5, "units": 64, "loss": "l2",
+                                    "activation": "relu", "learning_rate": 0.001},
     },
     "rnn_feat": {
         "scaling": "features",
-        "scaling_description": "StandardScaler on sequence features; reshape (-1, n_features) fit/transform then reshape back to (samples, n_steps, n_features)",
+        "scaling_description": "Scaler (standard/minmax/robust) on sequence features; reshape (-1, n_features) fit/transform then reshape back to (samples, n_steps, n_features)",
         "input_type": "feature_sequence",
         "uses_n_steps": True,
         "default_n_steps": 5,
@@ -254,11 +257,12 @@ MODEL_METADATA = {
             "sequence_builder": "prepare_feature_sequences",
             "reshape": "(samples, n_steps, n_features)",
         },
-        "default_hyperparameters": {"n_steps": 5, "loss": "l2"},
+        "default_hyperparameters": {"n_steps": 5, "loss": "l2",
+                                    "activation": "relu", "learning_rate": 0.001},
     },
     "cnn1d": {
         "scaling": "features",
-        "scaling_description": "StandardScaler on sequence features; reshape (-1, n_features) fit/transform then reshape back to (samples, n_steps, n_features)",
+        "scaling_description": "Scaler (standard/minmax/robust) on sequence features; reshape (-1, n_features) fit/transform then reshape back to (samples, n_steps, n_features)",
         "input_type": "feature_sequence",
         "uses_n_steps": True,
         "default_n_steps": 5,
@@ -267,7 +271,7 @@ MODEL_METADATA = {
             "sequence_builder": "prepare_feature_sequences",
             "reshape": "(samples, n_steps, n_features)",
         },
-        "default_hyperparameters": {"n_steps": 5, "loss": "l2"},
+        "default_hyperparameters": {"n_steps": 5, "loss": "l2", "learning_rate": 0.001},
     },
 }
 
@@ -284,11 +288,22 @@ def get_metadata_for_model(model_key):
     return dict(MODEL_METADATA.get(model_key, {}))
 
 
-def build_normalization_entry(metadata):
+def build_normalization_entry(metadata, hyperparameters=None):
+    """Build normalization entry for saved config. Uses hyperparameters for scaler type and feature_range when present."""
+    hp = hyperparameters if isinstance(hyperparameters, dict) else {}
     if not metadata or metadata.get("scaling") == "none":
-        return {"type": "none", "scope": None, "description": None}
+        # Still record if variation specified a scaler (e.g. for RNN/LSTM with scaler in hp)
+        scaler_name = (hp.get("scaler") or "none").lower().strip()
+        if scaler_name == "none":
+            return {"type": "none", "scope": None, "description": None, "feature_range": None}
+        scaler_type = "StandardScaler" if scaler_name == "standard" else "MinMaxScaler" if scaler_name == "minmax" else "RobustScaler" if scaler_name == "robust" else "StandardScaler"
+        out = {"type": scaler_type, "scope": "target", "description": f"Scaler from variation: {scaler_name}", "feature_range": hp.get("feature_range")}
+        return out
+    scaler_name = (hp.get("scaler") or "standard").lower().strip()
+    scaler_type = "StandardScaler" if scaler_name == "standard" else "MinMaxScaler" if scaler_name == "minmax" else "RobustScaler" if scaler_name == "robust" else "StandardScaler"
     return {
-        "type": "StandardScaler",
+        "type": scaler_type,
         "scope": metadata["scaling"],
         "description": metadata.get("scaling_description"),
+        "feature_range": hp.get("feature_range") if scaler_type == "MinMaxScaler" else None,
     }
