@@ -9,8 +9,10 @@ from tensorflow.keras.callbacks import EarlyStopping
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error
 
+from ..model_config import TUNING_SETUP
 from ..models.mlp import run_mlp
 from ..losses import get_keras_loss
+from ._validation import get_chronological_holdout_indices, score_validation_rmse
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +23,12 @@ def grid_search_mlp(X_train, X_test, y_train, y_test, loss='l2', results_dir=Non
     scaler = StandardScaler()
     X_train_sc = scaler.fit_transform(X_train)
     X_test_sc = scaler.transform(X_test)
-    val_size = int(len(X_train_sc) * 0.2)
-    X_tr, X_val = X_train_sc[:-val_size], X_train_sc[-val_size:]
-    y_tr = y_train.values[:-val_size] if hasattr(y_train, 'values') else y_train[:-val_size]
-    y_val = y_train.values[-val_size:] if hasattr(y_train, 'values') else y_train[-val_size:]
+    val_frac = TUNING_SETUP.get("val_frac", 0.2)
+    train_idx, val_idx = get_chronological_holdout_indices(len(X_train_sc), val_frac)
+    X_tr = X_train_sc[train_idx]
+    X_val = X_train_sc[val_idx]
+    y_tr = (y_train.values if hasattr(y_train, "values") else y_train)[train_idx]
+    y_val = (y_train.values if hasattr(y_train, "values") else y_train)[val_idx]
 
     units_list = [32, 64]
     dropout_rates = [0.1, 0.2]
@@ -49,7 +53,7 @@ def grid_search_mlp(X_train, X_test, y_train, y_test, loss='l2', results_dir=Non
                     model.compile(optimizer=Adam(learning_rate=lr), loss=get_keras_loss(loss))
                     model.fit(X_tr, y_tr, epochs=100, batch_size=32, validation_data=(X_val, y_val), callbacks=[early_stopping], verbose=0)
                     val_pred = model.predict(X_val, verbose=0).ravel()
-                    rmse = np.sqrt(mean_squared_error(y_val, val_pred))
+                    rmse = score_validation_rmse(y_val, val_pred)
                     results.append({'units': units, 'dropout': dr, 'learning_rate': lr, 'rmse': rmse})
                     if rmse < best_rmse:
                         best_rmse = rmse

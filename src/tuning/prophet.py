@@ -4,50 +4,37 @@ import os
 import numpy as np
 import pandas as pd
 from prophet import Prophet
-from sklearn.metrics import mean_squared_error
-from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
+
+from ..model_config import TUNING_SETUP
+from ._validation import get_chronological_holdout_indices, score_validation_rmse
 
 logger = logging.getLogger(__name__)
 
+
 def grid_search_prophet(train_data, test_data, results_dir=None, **kwargs):
     """
-    Grid search for Prophet hyperparameters.
-    
-    Parameters:
-    -----------
-    train_data : Series
-        Training data
-    test_data : Series
-        Test data
-        
-    Returns:
-    --------
-    tuple
-        Best parameters, best predictions
+    Grid search for Prophet hyperparameters using train-only validation.
+    Refits best model on full training data before producing test predictions.
+    Returns (best_params, best_predictions).
     """
     logger.info("Performing grid search for Prophet model...")
-    
-    # Prepare data in Prophet format
     train_df = pd.DataFrame({
-        'ds': train_data.index,
-        'y': train_data.values
+        "ds": train_data.index,
+        "y": train_data.values,
     })
-    
-    # Define parameter grid
+    n = len(train_df)
+    val_frac = TUNING_SETUP.get("val_frac", 0.2)
+    train_idx, val_idx = get_chronological_holdout_indices(n, val_frac)
+    train_val = train_df.iloc[train_idx]
+    val_df = train_df.iloc[val_idx][["ds"]]
+    val = train_df.iloc[val_idx]["y"].values
+
     param_grid = {
-        'changepoint_prior_scale': [0.001, 0.01, 0.1, 0.5],
-        'seasonality_prior_scale': [0.01, 0.1, 1.0, 10.0],
-        'seasonality_mode': ['additive', 'multiplicative']
+        "changepoint_prior_scale": [0.001, 0.01, 0.1, 0.5],
+        "seasonality_prior_scale": [0.01, 0.1, 1.0, 10.0],
+        "seasonality_mode": ["additive", "multiplicative"],
     }
-    
-    # Generate all combinations
     all_params = [dict(zip(param_grid.keys(), v)) for v in itertools.product(*param_grid.values())]
-    
-    # Validation set
-    val_size = min(len(test_data), len(train_data) // 4)
-    train_val = train_df.iloc[:-val_size]
-    val_df = pd.DataFrame({'ds': train_data.index[-val_size:]})
-    val = train_data[-val_size:]
     
     rmses = []
     
@@ -55,9 +42,8 @@ def grid_search_prophet(train_data, test_data, results_dir=None, **kwargs):
         model = Prophet(**params)
         model.fit(train_val)
         forecast = model.predict(val_df)
-        val_pred = forecast['yhat'].values
-        
-        rmse = np.sqrt(mean_squared_error(val, val_pred))
+        val_pred = forecast["yhat"].values
+        rmse = score_validation_rmse(val, val_pred)
         rmses.append(rmse)
         
         logger.debug(f"Prophet({params}) - RMSE: {rmse:.4f}")

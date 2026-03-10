@@ -9,9 +9,11 @@ from tensorflow.keras.callbacks import EarlyStopping
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error
 
+from ..model_config import TUNING_SETUP
 from ..models._dl_utils import prepare_sequence_data
 from ..models.lstm import create_lstm_model, run_lstm
 from ..losses import get_keras_loss
+from ._validation import get_chronological_holdout_indices, score_validation_rmse
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +23,10 @@ def grid_search_lstm(train_data, test_data, loss='l2', results_dir=None, **kwarg
     logger.info(f"Performing grid search for LSTM ({loss.upper()}) model...")
     scaler = StandardScaler()
     train_scaled = scaler.fit_transform(train_data.values.reshape(-1, 1))
-    val_size = int(len(train_scaled) * 0.2)
-    train_set = train_scaled[:-val_size]
-    val_set = train_scaled[-val_size:]
+    val_frac = TUNING_SETUP.get("val_frac", 0.2)
+    train_idx, val_idx = get_chronological_holdout_indices(len(train_scaled), val_frac)
+    train_set = train_scaled[train_idx]
+    val_set = train_scaled[val_idx]
 
     n_steps_list = [3, 5]
     units_list = [32, 50]
@@ -68,7 +71,7 @@ def grid_search_lstm(train_data, test_data, loss='l2', results_dir=None, **kwarg
                                     verbose=0,
                                 )
                                 val_pred = model.predict(X_val, verbose=0).ravel()
-                                rmse = np.sqrt(mean_squared_error(y_val, val_pred))
+                                rmse = score_validation_rmse(y_val, val_pred)
                                 results.append({
                                     'n_steps': n_steps, 'units': units, 'layers': layers,
                                     'dropout_rate': dropout_rate, 'learning_rate': lr,

@@ -26,6 +26,13 @@ DEFAULT_SETUP = {
     "n_runs": 3,                        # run each (model, variation) this many times; rerank by mean metrics
 }
 
+# Tuning policy: same validation contract for all models (train-only splits, RMSE selection)
+TUNING_SETUP = {
+    "n_splits": 3,                      # TimeSeriesSplit / expanding-window folds for tabular
+    "val_frac": 0.2,                   # last fraction of train as validation for DL/statistical
+    "selection_metric": "rmse",
+}
+
 # Exactly 3 variation specs per model (aligned to what each model supports)
 VARIATIONS_PER_MODEL = {
     "arima": [

@@ -4,6 +4,7 @@ import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
 
+from ..model_config import TUNING_SETUP
 from ..models.random_forest import run_random_forest
 from ..losses import get_rf_criterion
 
@@ -20,7 +21,8 @@ def grid_search_random_forest(X_train, X_test, y_train, y_test, loss='l2', resul
         'min_samples_split': [2, 5, 10],
         'min_samples_leaf': [1, 2, 4],
     }
-    tscv = TimeSeriesSplit(n_splits=3)
+    n_splits = TUNING_SETUP.get("n_splits", 3)
+    tscv = TimeSeriesSplit(n_splits=n_splits)
     rf = RandomForestRegressor(random_state=42, criterion=criterion)
     grid_search = GridSearchCV(
         estimator=rf,

@@ -5,6 +5,8 @@ from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
 from sklearn.svm import SVR
 from sklearn.preprocessing import StandardScaler
 
+from ..model_config import TUNING_SETUP
+
 logger = logging.getLogger(__name__)
 
 
@@ -23,7 +25,8 @@ def grid_search_svr(X_train, X_test, y_train, y_test, results_dir=None, **kwargs
         'gamma': ['scale', 'auto', 0.1, 0.01],
         'epsilon': [0.01, 0.1, 0.2],
     }
-    tscv = TimeSeriesSplit(n_splits=3)
+    n_splits = TUNING_SETUP.get("n_splits", 3)
+    tscv = TimeSeriesSplit(n_splits=n_splits)
     grid_search = GridSearchCV(
         estimator=SVR(),
         param_grid=param_grid,

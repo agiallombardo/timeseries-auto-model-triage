@@ -69,7 +69,7 @@ def _print_results_report(results_df_agg, top_models_df, judgment_text):
     # Table with consistent formatting
     disp = _format_results_for_display(results_df_agg)
     print("\n" + "=" * 64)
-    print("RESULTS (median across variations, sorted by composite score)")
+    print("RESULTS (median across variations, sorted by composite score; test metrics = final evaluation only)")
     print("=" * 64)
     print(disp.to_string(index=False))
     print("-" * 64)
@@ -160,7 +160,7 @@ def _build_run_config(
         time_steps = {"n_steps": n_steps}
     normalization = build_normalization_entry(metadata) if metadata else {"type": "none", "scope": None, "description": None}
     shape_and_reshaping = (metadata.get("shape_and_reshaping") if metadata else None) or None
-    return {
+    config = {
         "model_key": model_key,
         "variation_index": variation_index,
         "variation_spec": variation_spec,
@@ -172,6 +172,10 @@ def _build_run_config(
         "shape_and_reshaping": shape_and_reshaping,
         "hyperparameters": hyperparameters if isinstance(hyperparameters, dict) else {},
     }
+    if tuned:
+        config["selection_metric"] = "rmse"
+        config["hyperparameters_note"] = "Validation-selected (held-out test not used for parameter selection)."
+    return config
 
 
 # Module-level logger
@@ -476,7 +480,7 @@ def process_results(args, default_setup, all_predictions, model_names, results, 
     results_df['composite_score'] = results_df['_row_id'].map(scored_df.set_index('_row_id')['composite_score'])
     results_df = results_df.drop(columns=['_row_id'])
 
-    # Aggregate to one row per model: median metrics across variations, params from best variation
+    # Aggregate to one row per model: median metrics across variations; best variation = by test composite score (config saved is that variation's hyperparameters; when tuned, those are validation-selected)
     metric_cols = [c for c in ['composite_score', 'rmse', 'mae', 'r2', 'mase', 'mape'] if c in results_df.columns]
     agg_list = []
     for model_name, group in results_df.groupby('model', sort=False):
@@ -557,7 +561,7 @@ def process_results(args, default_setup, all_predictions, model_names, results, 
         'testing_samples': len(y_test)
     }
     
-    # Single results summary JSON: dataset, best_judgment, results (all models in order; no separate top_models), best_per_run, tuned_best_params
+    # Single results summary JSON: dataset, best_judgment, results (test metrics = final evaluation only)
     results_list = []
     for _, row in results_df_agg.iterrows():
         best_idx = int(row['best_variation_index'])
@@ -570,6 +574,7 @@ def process_results(args, default_setup, all_predictions, model_names, results, 
             'r2': float(row['r2']),
             'variation_spec': cfg.get('variation_spec', {}),
             'hyperparameters': cfg.get('hyperparameters', {}),
+            'hyperparameters_source': 'validation' if cfg.get('tuned') else 'default_variation',
         }
         if 'mase' in row and not (pd.isna(row['mase']) or np.isinf(row['mase'])):
             entry['mase'] = float(row['mase'])
@@ -586,6 +591,10 @@ def process_results(args, default_setup, all_predictions, model_names, results, 
         results_summary["best_per_run"] = best_per_run
     if tuned_best_params:
         results_summary["tuned_best_params"] = tuned_best_params
+        results_summary["parameter_selection"] = {
+            "metric": "rmse",
+            "note": "Best parameters chosen by validation only; test metrics are final evaluation only.",
+        }
     summary_path = os.path.join(dataset_results_dir, "results_summary.json")
     with open(summary_path, "w") as f:
         json.dump(results_summary, f, indent=2)

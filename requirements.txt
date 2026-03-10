@@ -34,3 +34,6 @@ ipykernel>=6.0.0
 # Time series specific
 pyts>=0.12.0  # Time series classification and transformation
 pmdarima>=2.0.0  # Auto ARIMA
+
+# Testing
+pytest>=7.0.0

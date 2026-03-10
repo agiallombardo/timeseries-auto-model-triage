@@ -4,6 +4,7 @@ import pandas as pd
 from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
 from xgboost import XGBRegressor
 
+from ..model_config import TUNING_SETUP
 from ..losses import get_xgb_params
 
 logger = logging.getLogger(__name__)
@@ -21,7 +22,8 @@ def grid_search_xgboost(X_train, X_test, y_train, y_test, loss='l2', results_dir
         'subsample': [0.8, 0.9, 1.0],
         'colsample_bytree': [0.8, 0.9, 1.0],
     }
-    tscv = TimeSeriesSplit(n_splits=3)
+    n_splits = TUNING_SETUP.get("n_splits", 3)
+    tscv = TimeSeriesSplit(n_splits=n_splits)
     xgb = XGBRegressor(random_state=42, **xgb_extra)
     grid_search = GridSearchCV(
         estimator=xgb,
