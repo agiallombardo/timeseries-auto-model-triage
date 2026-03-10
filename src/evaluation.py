@@ -597,23 +597,35 @@ def create_residuals_plot(y_test, predictions, model_names, save_path='top_3_res
 
 def plot_feature_importance(results_dir, save_path='feature_importance.png'):
     """
-    Read rf_feature_importance.csv and/or xgb_feature_importance.csv from results_dir
-    and plot horizontal bar charts (one subplot per model).
+    Always write feature_importance.png. When rf/xgb feature importance CSVs exist,
+    plot horizontal bar charts (one subplot per model). Otherwise write a placeholder.
     """
     patterns = ['rf_feature_importance.csv', 'xgb_feature_importance.csv']
     files = []
     for p in patterns:
         files.extend(glob.glob(os.path.join(results_dir, p)))
-    if not files:
+    valid_data = []
+    for path in files:
+        try:
+            df = pd.read_csv(path)
+            if 'feature' in df.columns and 'importance' in df.columns:
+                valid_data.append((path, df))
+        except (pd.errors.EmptyDataError, OSError):
+            pass
+    if not valid_data:
+        fig, ax = plt.subplots(1, 1, figsize=(8, 2))
+        ax.axis('off')
+        ax.text(0.5, 0.5, 'No feature importance data.\nRun Random Forest or XGBoost tuning to generate.',
+                ha='center', va='center', fontsize=12)
+        plt.savefig(save_path, bbox_inches='tight')
+        plt.close()
+        logger.info("Feature importance placeholder saved as '%s'", save_path)
         return
-    n = len(files)
+    n = len(valid_data)
     fig, axes = plt.subplots(n, 1, figsize=(10, 4 * n))
     if n == 1:
         axes = [axes]
-    for ax, path in zip(axes, files):
-        df = pd.read_csv(path)
-        if 'feature' not in df.columns or 'importance' not in df.columns:
-            continue
+    for ax, (path, df) in zip(axes, valid_data):
         df = df.sort_values('importance', ascending=True).tail(20)
         ax.barh(df['feature'], df['importance'], color='#1f77b4', alpha=0.8)
         ax.set_xlabel('Importance')
@@ -622,4 +634,4 @@ def plot_feature_importance(results_dir, save_path='feature_importance.png'):
     plt.tight_layout()
     plt.savefig(save_path, bbox_inches='tight')
     plt.close()
-    logger.info(f"Feature importance plot saved as '{save_path}'")
+    logger.info("Feature importance plot saved as '%s'", save_path)

@@ -483,6 +483,8 @@ def _run_models_impl(args, default_setup, available_models, tuning_functions, X_
     # If tune_all: run tuning for each (model, variation) - same 3 variations per model
     if args.tune_all:
         logger.info("Performing hyperparameter tuning for all models (3 variations each)")
+        tune_all_results_dir = _dataset_results_dir(args)
+        os.makedirs(tune_all_results_dir, exist_ok=True)
         tuning_tasks = []
         for model_key in models_to_run:
             if model_key not in tuning_functions:
@@ -500,6 +502,7 @@ def _run_models_impl(args, default_setup, available_models, tuning_functions, X_
                 var_X_test = _subset_lag_features(X_test, var_lags) if var_lags else X_test
                 model_params = _base_params(default_setup, model_key, y_train, y_test, var_X_train, var_X_test, seasonal_periods)
                 model_params.update(variation_spec)
+                model_params["results_dir"] = tune_all_results_dir
                 pred, name, best_params = execute_tuning(model_key, tuning_functions, model_params)
                 all_predictions.append(pred)
                 model_names.append(name)

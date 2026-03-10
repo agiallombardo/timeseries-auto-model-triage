@@ -77,15 +77,14 @@ def generate_html_report(
     if save_path is None:
         save_path = os.path.join(results_dir, "report.html")
 
-    # Inline images
+    # Inline images (skip optional charts when file not generated)
     images_html = []
     for name in REPORT_IMAGES:
         path = os.path.join(results_dir, name)
         data = _img_to_base64(path)
         if data:
             images_html.append(f'<h3>{name}</h3><img src="{data}" alt="{name}" style="max-width:100%;"/>')
-        else:
-            images_html.append(f"<h3>{name}</h3><p>(image not found)</p>")
+        # Optional charts (e.g. feature_importance.png) only exist when RF/XGB tuning ran; skip section if missing
 
     dataset = results_summary.get("dataset", {})
     judgment = results_summary.get("best_judgment", "")
