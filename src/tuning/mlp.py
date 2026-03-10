@@ -11,6 +11,7 @@ from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping
 
 from ..model_config import TUNING_SETUP
+from ..config import get_dl_overrides
 from ..models.mlp import run_mlp
 from ..losses import get_keras_loss
 from ..preprocessing import get_scaler
@@ -44,14 +45,25 @@ def grid_search_mlp(X_train, X_test, y_train, y_test, loss='l2', results_dir=Non
     y_tr = y_arr[train_idx]
     y_val = y_arr[val_idx]
 
-    units_list = [32, 64]
-    dropout_rates = [0.1, 0.2]
-    learning_rates = [0.001, 0.01]
-    activations = ['relu', 'tanh']
+    dl = get_dl_overrides()
+    epochs_grid = dl.get("epochs_grid", 100)
+    epochs_refit = dl.get("epochs_refit", 200)
+    patience = dl.get("patience", 10)
+
+    if TUNING_SETUP.get("tuning_fast"):
+        units_list = [64]
+        dropout_rates = [0.1]
+        learning_rates = [0.001]
+        activations = ['relu']
+    else:
+        units_list = [32, 64]
+        dropout_rates = [0.1, 0.2]
+        learning_rates = [0.001, 0.01]
+        activations = ['relu', 'tanh']
     best_rmse = float('inf')
     best_params = None
     results = []
-    early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+    early_stopping = EarlyStopping(monitor='val_loss', patience=patience, restore_best_weights=True)
     combos = list(product(activations, units_list, dropout_rates, learning_rates))
 
     for (act, units, dr, lr) in tqdm(
@@ -67,7 +79,7 @@ def grid_search_mlp(X_train, X_test, y_train, y_test, loss='l2', results_dir=Non
                 Dense(1),
             ])
             model.compile(optimizer=Adam(learning_rate=lr), loss=get_keras_loss(loss))
-            model.fit(X_tr, y_tr, epochs=100, batch_size=32,
+            model.fit(X_tr, y_tr, epochs=epochs_grid, batch_size=32,
                       validation_data=(X_val, y_val),
                       callbacks=[early_stopping], verbose=0)
             val_pred = model.predict(X_val, verbose=0).ravel()
@@ -101,7 +113,7 @@ def grid_search_mlp(X_train, X_test, y_train, y_test, loss='l2', results_dir=Non
         ])
         model.compile(optimizer=Adam(learning_rate=best_params['learning_rate']),
                       loss=get_keras_loss(loss))
-        model.fit(X_train_sc, y_train, epochs=200, batch_size=32,
+        model.fit(X_train_sc, y_train, epochs=epochs_refit, batch_size=32,
                   validation_split=0.2, callbacks=[early_stopping], verbose=0)
         best_predictions = model.predict(X_test_sc, verbose=0).ravel()
     else:

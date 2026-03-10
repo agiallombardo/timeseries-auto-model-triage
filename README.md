@@ -91,13 +91,94 @@ Each dataset's results are saved in a dedicated directory (results/{dataset_name
 - Facebook Prophet
 
 
+## Performance and GPU (MacBook Pro)
+
+**Apple Silicon (M1/M2/M3/M4):** For faster deep learning training, install the optional Metal plugin so TensorFlow uses the GPU:
+
+```bash
+pip install tensorflow-metal
+```
+
+Or install from the project’s optional requirements (includes `tensorflow-metal`):
+
+```bash
+pip install -r requirements-mac-gpu.txt
+```
+
+TensorFlow will then use Metal for Keras models by default; no code changes are required.
+
+**Intel Macs:** TensorFlow on macOS does not use the Intel iGPU for training. Use CPU or consider a cloud GPU for heavy DL workloads.
+
+**TensorFlow threading (CPU or GPU):** You can tune how many threads TensorFlow uses for intra-op and inter-op parallelism via environment variables (e.g. before running `main.py`):
+
+- `TF_NUM_INTRAOP_THREADS` – threads used within an op (default: auto).
+- `TF_NUM_INTEROP_THREADS` – threads used across ops (default: auto).
+
+Example (use 4 and 2 threads):
+
+```bash
+export TF_NUM_INTRAOP_THREADS=4
+export TF_NUM_INTEROP_THREADS=2
+python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales
+```
+
+These can also be set in a `.env` file (see [Configuration via .env](#configuration-via-env)).
+
+## Configuration via .env
+
+You can set default options in a `.env` file in the project root so you don’t have to pass them on the CLI every time. Options in `.env` override code defaults; CLI arguments override `.env`.
+
+Create a `.env` file (it is gitignored). Example:
+
+```env
+# Data (optional; if set, you can run: python main.py)
+DATA_FILE=data/samples/retail_sales_daily.csv
+TIME_COL=date
+DATA_COL=sales
+
+# Performance
+N_RUNS=1
+MODELS=rf,xgb,mlp
+JOBS=1
+TUNE_TOP=3
+TUNE_ALL=false
+OUTPUT_DIR=results
+
+# Optional: fast tuning (fewer grid points / CV splits)
+# TUNING_FAST=false
+# TUNING_N_SPLITS=3
+
+# Optional: deep learning (epochs / early stopping patience)
+# DL_EPOCHS_GRID=50
+# DL_EPOCHS_REFIT=200
+# DL_PATIENCE=10
+
+# Optional: minimal output (skip extra charts)
+# MINIMAL_OUTPUT=false
+# NO_CHARTS=false
+
+# Optional: TensorFlow threading (see Performance and GPU above)
+# TF_NUM_INTRAOP_THREADS=
+# TF_NUM_INTEROP_THREADS=
+```
+
+With `DATA_FILE`, `TIME_COL`, and `DATA_COL` set, you can run:
+
+```bash
+python main.py
+```
+
+Or override for a single run: `python main.py --file other.csv --time_col ts --data_col value`.
+
 ## Advanced Configuration
 
-Adjust lag features for machine learning models: \
-`python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales --lags 10`
+Run a subset of models, control runs and tuning, or enable parallel model runs:
 
-Set the test set size: \
-`python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales --test_size 0.3`
-
-Configure sequence length for neural networks: \
-`python main.py --file data/samples/retail_sales_daily.csv --time_col date --data_col sales --n_steps 5`
+- `--models rf xgb mlp` – run only these models.
+- `--n-runs 1` – single sweep (faster; default from config is 3).
+- `--tune_top 5` – tune top 5 models (default 3).
+- `--tune_all` – tune all models (time-consuming).
+- `--jobs 2` – run up to 2 (model × variation) tasks in parallel (default 1).
+- `--output_dir results` – where to save results.
+- `--minimal-output` – skip non-essential charts; keep CSV and config.
+- `--no-charts` – skip all chart generation.

@@ -10,6 +10,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error
 
 from ..model_config import TUNING_SETUP
+from ..config import get_dl_overrides
 from ..models._dl_utils import prepare_sequence_data
 from ..models.rnn import create_rnn_model, run_rnn
 from ..losses import get_keras_loss
@@ -28,16 +29,26 @@ def grid_search_rnn(train_data, test_data, loss='l2', results_dir=None, **kwargs
     train_set = train_scaled[train_idx]
     val_set = train_scaled[val_idx]
 
-    n_steps_list = [3, 5, 7]
-    units_list = [32, 50]
-    learning_rates = [0.001, 0.01]
-    batch_sizes = [16, 32]
+    dl = get_dl_overrides()
+    epochs_grid = dl.get("epochs_grid", 50)
+    epochs_refit = dl.get("epochs_refit", 100)
+    patience = dl.get("patience", 10)
+    if TUNING_SETUP.get("tuning_fast"):
+        n_steps_list = [5]
+        units_list = [50]
+        learning_rates = [0.001]
+        batch_sizes = [32]
+    else:
+        n_steps_list = [3, 5, 7]
+        units_list = [32, 50]
+        learning_rates = [0.001, 0.01]
+        batch_sizes = [16, 32]
 
     best_rmse = float('inf')
     best_params = None
     best_model = None
     results = []
-    early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+    early_stopping = EarlyStopping(monitor='val_loss', patience=patience, restore_best_weights=True)
     combos = list(product(n_steps_list, units_list, learning_rates, batch_sizes))
 
     for (n_steps, units, lr, batch_size) in tqdm(
@@ -53,7 +64,7 @@ def grid_search_rnn(train_data, test_data, loss='l2', results_dir=None, **kwargs
             model = create_rnn_model((n_steps, 1), units=units, learning_rate=lr, loss=loss)
             model.fit(
                 X_train, y_train,
-                epochs=50,
+                epochs=epochs_grid,
                 batch_size=batch_size,
                 validation_data=(X_val, y_val),
                 callbacks=[early_stopping],
@@ -78,7 +89,7 @@ def grid_search_rnn(train_data, test_data, loss='l2', results_dir=None, **kwargs
     if best_model is not None and best_params is not None:
         X_train_full, y_train_full = prepare_sequence_data(train_scaled, best_params['n_steps'])
         X_train_full = X_train_full.reshape(X_train_full.shape[0], X_train_full.shape[1], 1)
-        best_model.fit(X_train_full, y_train_full, epochs=100, batch_size=best_params['batch_size'], callbacks=[early_stopping], verbose=0)
+        best_model.fit(X_train_full, y_train_full, epochs=epochs_refit, batch_size=best_params['batch_size'], callbacks=[early_stopping], verbose=0)
         predictions = []
         last_sequence = train_scaled[-best_params['n_steps']:].reshape(1, best_params['n_steps'], 1)
         for _ in range(len(test_data)):

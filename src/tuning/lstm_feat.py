@@ -11,6 +11,7 @@ from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping
 
 from ..model_config import TUNING_SETUP
+from ..config import get_dl_overrides
 from ..models._dl_utils import prepare_feature_sequences
 from ..models.lstm_feat import run_lstm_features
 from ..losses import get_keras_loss
@@ -28,16 +29,28 @@ def grid_search_lstm_features(X_train, X_test, y_train, y_test, loss='l2', resul
     Searches: n_steps, units, dropout, learning_rate, activation.
     """
     logger.info(f"Performing grid search for LSTM-feat ({loss.upper()}, scaler={scaler}) model...")
-    n_steps_list = [3, 5, 7]
-    units_list = [32, 64]
-    dropout_rates = [0.0, 0.2]
-    learning_rates = [0.001, 0.01]
-    activations = ['relu', 'tanh']
+    dl = get_dl_overrides()
+    epochs_grid = dl.get("epochs_grid", 50)
+    epochs_refit = dl.get("epochs_refit", 200)
+    patience = dl.get("patience", 10)
+    if TUNING_SETUP.get("tuning_fast"):
+        n_steps_list = [5]
+        units_list = [64]
+        dropout_rates = [0.2]
+        learning_rates = [0.001]
+        activations = ['relu']
+        max_combinations = 4
+    else:
+        n_steps_list = [3, 5, 7]
+        units_list = [32, 64]
+        dropout_rates = [0.0, 0.2]
+        learning_rates = [0.001, 0.01]
+        activations = ['relu', 'tanh']
+        max_combinations = 24
 
     best_rmse = float('inf')
     best_params = None
     results = []
-    max_combinations = 24
     combos = []
     for n_steps in n_steps_list:
         for combo in product(activations, units_list, dropout_rates, learning_rates):
@@ -85,9 +98,9 @@ def grid_search_lstm_features(X_train, X_test, y_train, y_test, loss='l2', resul
                 model.add(Dropout(dr))
             model.add(Dense(1))
             model.compile(optimizer=Adam(learning_rate=lr), loss=get_keras_loss(loss))
-            es = EarlyStopping(monitor='val_loss', patience=10,
+            es = EarlyStopping(monitor='val_loss', patience=patience,
                                restore_best_weights=True)
-            model.fit(X_tr_s, y_tr_s, epochs=50, batch_size=32,
+            model.fit(X_tr_s, y_tr_s, epochs=epochs_grid, batch_size=32,
                       validation_data=(X_val_s, y_val_s),
                       callbacks=[es], verbose=0)
             val_pred = model.predict(X_val_s, verbose=0).ravel()
@@ -129,8 +142,8 @@ def grid_search_lstm_features(X_train, X_test, y_train, y_test, loss='l2', resul
         model.add(Dense(1))
         model.compile(optimizer=Adam(learning_rate=best_params['learning_rate']),
                       loss=get_keras_loss(loss))
-        es = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
-        model.fit(X_tr_sc, y_tr_seq, epochs=200, batch_size=32,
+        es = EarlyStopping(monitor='val_loss', patience=patience, restore_best_weights=True)
+        model.fit(X_tr_sc, y_tr_seq, epochs=epochs_refit, batch_size=32,
                   validation_split=0.2, callbacks=[es], verbose=0)
         best_predictions = model.predict(X_te_sc, verbose=0).ravel()
     else:

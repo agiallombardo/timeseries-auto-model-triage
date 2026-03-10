@@ -12,8 +12,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
 from tqdm import tqdm
+from joblib import Parallel, delayed
+from dotenv import load_dotenv
 
 from src.utils import setup_logging
+from src.config import resolve_data_args, resolve_run_args, apply_tuning_setup_from_env
+from src.device import init_tensorflow_device_and_threading
 from src.data_handling import load_data, prepare_features, split_data
 from src.evaluation import (
     evaluate_model, plot_results, create_trellis_plot,
@@ -245,27 +249,48 @@ logger = logging.getLogger(__name__)
 def main():
 
     """Main function to run the time series forecasting comparison."""
+    load_dotenv(os.environ.get("TRIAGE_ENV", ".env"))
+
     parser = argparse.ArgumentParser(
         description='Time Series Forecasting Model Comparison. Each model runs 3 variations (different params) to find the best.'
     )
-    parser.add_argument('--file', required=True, help='Path to the data file')
-    parser.add_argument('--time_col', required=True, help='Name of the time/date column')
-    parser.add_argument('--data_col', required=True, help='Name of the data column to forecast')
-    parser.add_argument('--date_format', help='Format of the date string (if needed)')
-    parser.add_argument('--models', nargs='+', default=['all'],
-                        help='Models to run (all, arima, sarima, es, prophet, rf, svr, xgb, ma, lr, rnn, lstm, mlp, lstm_feat, rnn_feat, cnn1d)')
+    parser.add_argument('--file', required=False, default=None, help='Path to the data file (or set DATA_FILE in .env)')
+    parser.add_argument('--time_col', required=False, default=None, help='Name of the time/date column (or set TIME_COL in .env)')
+    parser.add_argument('--data_col', required=False, default=None, help='Name of the data column to forecast (or set DATA_COL in .env)')
+    parser.add_argument('--date_format', default=None, help='Format of the date string (or set DATE_FORMAT in .env)')
+    parser.add_argument('--models', nargs='+', default=None,
+                        help='Models to run (or set MODELS=rf,xgb,mlp in .env). Default: all.')
     parser.add_argument('--losses', nargs='+', default=None,
-                        help='Loss variants to run (default: all). Choices: l1, l2, huber, quantile. Only applies to models that support losses.')
-    parser.add_argument('--tune_top', type=int, default=3,
-                        help='Number of top models to tune (default: 3, set to 0 to disable tuning)')
-    parser.add_argument('--tune_all', action='store_true', 
-                   help='Tune all models instead of just the top performing ones')
-    parser.add_argument('--output_dir', default='results', help='Directory to save results')
-    
+                        help='Loss variants to run (default: all). Choices: l1, l2, huber, quantile. Set LOSSES in .env for comma-separated list.')
+    parser.add_argument('--tune_top', type=int, default=None,
+                        help='Number of top models to tune (default: 3, or TUNE_TOP in .env). Set to 0 to disable.')
+    parser.add_argument('--tune_all', action='store_true',
+                        help='Tune all models instead of just the top performing ones (or TUNE_ALL=true in .env).')
+    parser.add_argument('--output_dir', default=None, help='Directory to save results (or OUTPUT_DIR in .env). Default: results.')
+    parser.add_argument('--jobs', type=int, default=None,
+                        help='Parallel jobs for (model × variation) runs (default: 1, or JOBS in .env).')
+    parser.add_argument('--n-runs', type=int, default=None,
+                        help='Number of program runs to aggregate (default from config/.env, usually 3). Use 1 for faster iteration.')
+    parser.add_argument('--minimal-output', action='store_true',
+                        help='Skip non-essential charts; keep CSV and config (or MINIMAL_OUTPUT=true in .env).')
+    parser.add_argument('--no-charts', action='store_true',
+                        help='Skip all chart generation (or NO_CHARTS=true in .env).')
+
     args = parser.parse_args()
+
+    resolve_data_args(args)
+    if args.file is None or args.time_col is None or args.data_col is None:
+        parser.error("Data source required: provide --file, --time_col, --data_col or set DATA_FILE, TIME_COL, DATA_COL in .env")
+
+    default_setup = get_default_setup()
+    resolve_run_args(args, default_setup)
+    apply_tuning_setup_from_env()
 
     # Setup logging
     logger = setup_logging(args.output_dir)
+
+    # TensorFlow: prefer Metal GPU on Apple Silicon and apply threading env vars
+    init_tensorflow_device_and_threading()
 
     # Validate --losses if provided; keep only valid keys and warn once
     if args.losses is not None:
@@ -294,7 +319,6 @@ def main():
     logger.info(f"Time column: {args.time_col}")
     logger.info(f"Data column: {args.data_col}")
 
-    default_setup = get_default_setup()
     logger.info(f"Setup: test_size={default_setup['test_size']}, lags_options={default_setup.get('lags_options')} (built with max={default_setup['lags']}, subsetted per variation), n_steps={default_setup.get('n_steps_univariate')}, ma_window={default_setup['ma_window']} (3 variations per model)")
 
     # Load and prepare data (use default setup, not CLI)
@@ -461,56 +485,110 @@ def _run_models_impl(args, default_setup, available_models, tuning_functions, X_
         return all_predictions, model_names, results, run_configs, []
 
     # Default: loop the entire program n_runs times, then aggregate and rerank by mean metrics
-    n_runs = default_setup.get("n_runs", 3)
+    n_runs = args.n_runs if getattr(args, "n_runs", None) is not None else default_setup.get("n_runs", 3)
     all_runs_preds = []
     all_runs_results = []
     first_run_names = []
     best_per_run = []
+    run_config_args = {"file": args.file, "time_col": args.time_col, "data_col": args.data_col}
 
-    for run_idx in tqdm(range(n_runs), desc="Runs", unit="run"):
-        logger.info(f"=== Program run {run_idx + 1}/{n_runs} ===")
-        run_preds = []
-        run_results = []
-        model_bar = tqdm(models_to_run, desc=f"Run {run_idx + 1}/{n_runs}", unit="model", leave=False)
-        for model_key in model_bar:
-            if model_key not in available_models:
-                continue
-            model_bar.set_postfix(model=model_key)
-            t0_model = time.time()
-            variations = get_variations_for_model(model_key)
-            metadata = get_metadata_for_model(model_key)
-            default_hp = dict(metadata.get("default_hyperparameters", {})) if metadata else {}
-            for variation_index, variation_spec in enumerate(variations):
-                try:
-                    var_lags = variation_spec.get("lags")
-                    var_X_train = _subset_lag_features(X_train, var_lags) if var_lags else X_train
-                    var_X_test = _subset_lag_features(X_test, var_lags) if var_lags else X_test
-                    model_params = _base_params(default_setup, model_key, y_train, y_test, var_X_train, var_X_test, seasonal_periods)
-                    model_params.update(variation_spec)
-                    loss_key = variation_spec.get("loss")
-                    logger.info(
-                        f"Running {model_key.upper()}" + (f" ({loss_key.upper()})" if loss_key else "") + " ..."
-                    )
-                    t0 = time.time()
-                    pred, name = execute_model(model_key, available_models, model_params)
-                    metrics = evaluate_model(y_test, pred, name, y_train)
-                    elapsed = time.time() - t0
-                    run_preds.append(np.asarray(pred))
-                    run_results.append(metrics)
-                    logger.info(f"  var {variation_index + 1}/3 → RMSE={metrics['rmse']:.4f}  ({elapsed:.1f}s)")
-                    if run_idx == 0:
-                        first_run_names.append(name)
-                        run_configs.append(_build_run_config(
-                            args, default_setup, model_key, variation_index, variation_spec,
-                            name, tuned=False, hyperparameters={**default_hp, **variation_spec}, metadata=metadata,
-                            n_train=len(y_train), n_test=len(y_test),
-                        ))
-                except Exception as e:
-                    logger.error(f"Error with {model_key.upper()} (variation {variation_index}): {e}")
-                    logger.error(traceback.format_exc())
-            logger.info(f"{model_key.upper()} completed in {time.time() - t0_model:.1f}s")
-        all_runs_preds.append(run_preds)
-        all_runs_results.append(run_results)
+    if getattr(args, "jobs", 1) > 1:
+        # Parallel: build task list and run with joblib (loky backend for fork safety)
+        tasks = []
+        for run_idx in range(n_runs):
+            for model_key in models_to_run:
+                if model_key not in available_models:
+                    continue
+                variations = get_variations_for_model(model_key)
+                for variation_index, variation_spec in enumerate(variations):
+                    tasks.append((
+                        run_idx, model_key, variation_index, variation_spec, default_setup,
+                        X_train, X_test, y_train, y_test, seasonal_periods, run_config_args,
+                    ))
+        logger.info("Running %d (model × variation) tasks with --jobs=%s", len(tasks), args.jobs)
+        raw_results = Parallel(n_jobs=args.jobs, backend="loky")(
+            delayed(_run_one_model_variation)(t) for t in tasks
+        )
+        # Sort by (run_idx, order of model_key in models_to_run, variation_index)
+        model_order = {mk: i for i, mk in enumerate(models_to_run)}
+        raw_results.sort(key=lambda r: (r[0], model_order.get(r[1], 0), r[2]))
+        # Rebuild per-run lists (same shape as sequential path)
+        run_preds_by_run = {}
+        run_results_by_run = {}
+        for run_idx, model_key, variation_index, pred, name, metrics, config in raw_results:
+            run_preds_by_run.setdefault(run_idx, []).append(pred)
+            run_results_by_run.setdefault(run_idx, []).append(metrics)
+            if run_idx == 0 and config is not None:
+                run_configs.append(config)
+                first_run_names.append(name)
+        for run_idx in range(n_runs):
+            all_runs_preds.append(run_preds_by_run.get(run_idx, []))
+            all_runs_results.append(run_results_by_run.get(run_idx, []))
+        for run_idx in range(n_runs):
+            run_results = all_runs_results[run_idx]
+            if run_results and run_configs:
+                run_df = pd.DataFrame(run_results)
+                _, _, run_df_scored = compute_best_judgment(run_df)
+                best_row = run_df_scored.iloc[0]
+                best_idx = int(run_df_scored.index[0])
+                cfg = run_configs[best_idx] if best_idx < len(run_configs) else {}
+                best_per_run.append({
+                    "run": run_idx + 1,
+                    "best_model": best_row["model"],
+                    "composite_score": round(float(best_row["composite_score"]), 4),
+                    "rmse": float(best_row["rmse"]),
+                    "mae": float(best_row["mae"]),
+                    "r2": float(best_row["r2"]),
+                    "variation_spec": cfg.get("variation_spec", {}),
+                    "hyperparameters": cfg.get("hyperparameters", {}),
+                })
+                logger.info(f"Run {run_idx + 1} best: {best_row['model']} (composite={best_row['composite_score']:.4f})")
+    else:
+        # Sequential
+        for run_idx in tqdm(range(n_runs), desc="Runs", unit="run"):
+            logger.info(f"=== Program run {run_idx + 1}/{n_runs} ===")
+            run_preds = []
+            run_results = []
+            model_bar = tqdm(models_to_run, desc=f"Run {run_idx + 1}/{n_runs}", unit="model", leave=False)
+            for model_key in model_bar:
+                if model_key not in available_models:
+                    continue
+                model_bar.set_postfix(model=model_key)
+                t0_model = time.time()
+                variations = get_variations_for_model(model_key)
+                metadata = get_metadata_for_model(model_key)
+                default_hp = dict(metadata.get("default_hyperparameters", {})) if metadata else {}
+                for variation_index, variation_spec in enumerate(variations):
+                    try:
+                        var_lags = variation_spec.get("lags")
+                        var_X_train = _subset_lag_features(X_train, var_lags) if var_lags else X_train
+                        var_X_test = _subset_lag_features(X_test, var_lags) if var_lags else X_test
+                        model_params = _base_params(default_setup, model_key, y_train, y_test, var_X_train, var_X_test, seasonal_periods)
+                        model_params.update(variation_spec)
+                        loss_key = variation_spec.get("loss")
+                        logger.info(
+                            f"Running {model_key.upper()}" + (f" ({loss_key.upper()})" if loss_key else "") + " ..."
+                        )
+                        t0 = time.time()
+                        pred, name = execute_model(model_key, available_models, model_params)
+                        metrics = evaluate_model(y_test, pred, name, y_train)
+                        elapsed = time.time() - t0
+                        run_preds.append(np.asarray(pred))
+                        run_results.append(metrics)
+                        logger.info(f"  var {variation_index + 1}/3 → RMSE={metrics['rmse']:.4f}  ({elapsed:.1f}s)")
+                        if run_idx == 0:
+                            first_run_names.append(name)
+                            run_configs.append(_build_run_config(
+                                args, default_setup, model_key, variation_index, variation_spec,
+                                name, tuned=False, hyperparameters={**default_hp, **variation_spec}, metadata=metadata,
+                                n_train=len(y_train), n_test=len(y_test),
+                            ))
+                    except Exception as e:
+                        logger.error(f"Error with {model_key.upper()} (variation {variation_index}): {e}")
+                        logger.error(traceback.format_exc())
+                logger.info(f"{model_key.upper()} completed in {time.time() - t0_model:.1f}s")
+            all_runs_preds.append(run_preds)
+            all_runs_results.append(run_results)
 
         # Best (model, variation) this run by composite score
         if run_results and run_configs:
@@ -597,6 +675,40 @@ def _base_params(default_setup, model_key, y_train, y_test, X_train, X_test, sea
         "ma_window": default_setup["ma_window"],
     }
 
+
+def _run_one_model_variation(task):
+    """Run a single (run_idx, model_key, variation) for parallel execution. Returns (run_idx, model_key, variation_index, pred, name, metrics, config_or_None)."""
+    (run_idx, model_key, variation_index, variation_spec, default_setup,
+     X_train, X_test, y_train, y_test, seasonal_periods, run_config_args) = task
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="No frequency information was provided")
+        warnings.filterwarnings("ignore", message=".*input_shape.*input_dim.*", category=UserWarning)
+        var_X_train = _subset_lag_features(X_train, variation_spec["lags"]) if variation_spec.get("lags") else X_train
+        var_X_test = _subset_lag_features(X_test, variation_spec["lags"]) if variation_spec.get("lags") else X_test
+        model_params = _base_params(default_setup, model_key, y_train, y_test, var_X_train, var_X_test, seasonal_periods)
+        model_params.update(variation_spec)
+        available_models = get_available_models()
+        pred, name = execute_model(model_key, available_models, model_params)
+    metrics = evaluate_model(y_test, pred, name, y_train)
+    config = None
+    if run_idx == 0:
+        metadata = get_metadata_for_model(model_key)
+        default_hp = dict(metadata.get("default_hyperparameters", {})) if metadata else {}
+        class _Args:
+            pass
+        args = _Args()
+        args.file = run_config_args["file"]
+        args.time_col = run_config_args["time_col"]
+        args.data_col = run_config_args["data_col"]
+        config = _build_run_config(
+            args, default_setup, model_key, variation_index, variation_spec,
+            name, tuned=False, hyperparameters={**default_hp, **variation_spec}, metadata=metadata,
+            n_train=len(y_train), n_test=len(y_test),
+        )
+    return (run_idx, model_key, variation_index, np.asarray(pred), name, metrics, config)
+
+
 def process_results(args, default_setup, all_predictions, model_names, results, run_configs, best_per_run, y_train, y_test, X_train, X_test, tuning_functions, tuned_best_params=None):
     """Process and display results. Saves model_configs.json and results_summary.json (single file, no redundancy)."""
     logger = logging.getLogger(__name__)
@@ -656,40 +768,46 @@ def process_results(args, default_setup, all_predictions, model_names, results, 
     valid_names = [model_names[i] for i in top_model_indices]
     top_model_predictions = [all_predictions[i] for i in top_model_indices]
 
-    # Trellis: top 9 models, each shown with its best variation's prediction
-    top_9_df = results_df_agg.head(9)
-    top_9_indices = top_9_df['best_variation_index'].astype(int).tolist()
-    top_9_predictions = [all_predictions[i] for i in top_9_indices]
-    top_9_names = [model_names[i] for i in top_9_indices]
-    create_trellis_plot(
-        y_train, y_test, top_9_predictions, top_9_names, results_df_agg,
-        os.path.join(dataset_results_dir, 'all_models_trellis.png'), max_models=9
-    )
+    skip_charts = getattr(args, "no_charts", False)
+    minimal = getattr(args, "minimal_output", False)
 
-    if valid_names and top_model_predictions:
-        create_top_models_plot(
-            y_train, y_test, top_model_predictions, valid_names,
-            os.path.join(dataset_results_dir, 'top_3_models_comparison.png')
-        )
+    if not skip_charts:
+        # Trellis: top 9 models (skip in minimal-output)
+        if not minimal:
+            top_9_df = results_df_agg.head(9)
+            top_9_indices = top_9_df['best_variation_index'].astype(int).tolist()
+            top_9_predictions = [all_predictions[i] for i in top_9_indices]
+            top_9_names = [model_names[i] for i in top_9_indices]
+            create_trellis_plot(
+                y_train, y_test, top_9_predictions, top_9_names, results_df_agg,
+                os.path.join(dataset_results_dir, 'all_models_trellis.png'), max_models=9
+            )
 
-    create_performance_chart(
-        results_df_agg,
-        os.path.join(dataset_results_dir, 'model_performance.png')
-    )
-    create_radar_chart(
-        results_df_agg,
-        os.path.join(dataset_results_dir, 'model_radar.png'),
-        max_models=5,
-    )
-    if valid_names and top_model_predictions:
-        create_residuals_plot(
-            y_test, top_model_predictions, valid_names,
-            os.path.join(dataset_results_dir, 'top_3_residuals.png'),
+        if valid_names and top_model_predictions:
+            create_top_models_plot(
+                y_train, y_test, top_model_predictions, valid_names,
+                os.path.join(dataset_results_dir, 'top_3_models_comparison.png')
+            )
+
+        create_performance_chart(
+            results_df_agg,
+            os.path.join(dataset_results_dir, 'model_performance.png')
         )
-    plot_feature_importance(
-        dataset_results_dir,
-        os.path.join(dataset_results_dir, 'feature_importance.png'),
-    )
+        if not minimal:
+            create_radar_chart(
+                results_df_agg,
+                os.path.join(dataset_results_dir, 'model_radar.png'),
+                max_models=5,
+            )
+            if valid_names and top_model_predictions:
+                create_residuals_plot(
+                    y_test, top_model_predictions, valid_names,
+                    os.path.join(dataset_results_dir, 'top_3_residuals.png'),
+                )
+        plot_feature_importance(
+            dataset_results_dir,
+            os.path.join(dataset_results_dir, 'feature_importance.png'),
+        )
 
     # Best model and judgment (with margin and family)
     model_name_to_family = _model_name_to_family_map(results_df_agg)

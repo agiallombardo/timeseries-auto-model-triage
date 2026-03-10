@@ -11,6 +11,7 @@ from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping
 
 from ..model_config import TUNING_SETUP
+from ..config import get_dl_overrides
 from ..models._dl_utils import prepare_feature_sequences
 from ..models.cnn1d import run_cnn1d
 from ..losses import get_keras_loss
@@ -28,15 +29,26 @@ def grid_search_cnn1d(X_train, X_test, y_train, y_test, loss='l2', results_dir=N
     Searches: n_steps, filters, kernel_size, learning_rate.
     """
     logger.info(f"Performing grid search for CNN-1D ({loss.upper()}, scaler={scaler}) model...")
-    n_steps_list = [3, 5, 7]
-    filters_list = [32, 64]
-    kernel_sizes = [2, 3]
-    learning_rates = [0.001, 0.01]
+    dl = get_dl_overrides()
+    epochs_grid = dl.get("epochs_grid", 50)
+    epochs_refit = dl.get("epochs_refit", 200)
+    patience = dl.get("patience", 10)
+    if TUNING_SETUP.get("tuning_fast"):
+        n_steps_list = [5]
+        filters_list = [64]
+        kernel_sizes = [3]
+        learning_rates = [0.001]
+        max_combinations = 4
+    else:
+        n_steps_list = [3, 5, 7]
+        filters_list = [32, 64]
+        kernel_sizes = [2, 3]
+        learning_rates = [0.001, 0.01]
+        max_combinations = 16
 
     best_rmse = float('inf')
     best_params = None
     results = []
-    max_combinations = 16
     combos = []
     for n_steps in n_steps_list:
         for combo in product(filters_list, kernel_sizes, learning_rates):
@@ -90,9 +102,9 @@ def grid_search_cnn1d(X_train, X_test, y_train, y_test, loss='l2', results_dir=N
                 Dense(1),
             ])
             model.compile(optimizer=Adam(learning_rate=lr), loss=get_keras_loss(loss))
-            es = EarlyStopping(monitor='val_loss', patience=10,
+            es = EarlyStopping(monitor='val_loss', patience=patience,
                                restore_best_weights=True)
-            model.fit(X_tr_s, y_tr_s, epochs=50, batch_size=32,
+            model.fit(X_tr_s, y_tr_s, epochs=epochs_grid, batch_size=32,
                       validation_data=(X_val_s, y_val_s),
                       callbacks=[es], verbose=0)
             val_pred = model.predict(X_val_s, verbose=0).ravel()
@@ -138,8 +150,8 @@ def grid_search_cnn1d(X_train, X_test, y_train, y_test, loss='l2', results_dir=N
         ])
         model.compile(optimizer=Adam(learning_rate=best_params['learning_rate']),
                       loss=get_keras_loss(loss))
-        es = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
-        model.fit(X_tr_sc, y_tr_seq, epochs=200, batch_size=32,
+        es = EarlyStopping(monitor='val_loss', patience=patience, restore_best_weights=True)
+        model.fit(X_tr_sc, y_tr_seq, epochs=epochs_refit, batch_size=32,
                   validation_split=0.2, callbacks=[es], verbose=0)
         best_predictions = model.predict(X_te_sc, verbose=0).ravel()
     else:
